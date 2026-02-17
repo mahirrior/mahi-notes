@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <title>Mahi's Notes — Python for AI Beginners</title>
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700;800&display=swap" rel="stylesheet"/>
   <style>
@@ -840,18 +841,42 @@ function selPay(el){
 }
 
 function doPayment(){
-  hasPaid = true;
-  closeM('payment');
-  document.getElementById('badge1').textContent = '✓ Unlocked';
-  document.getElementById('badge1').className = 'pbadge pb-unlocked';
-  const part1Row = document.getElementById('part1Row');
-  part1Row.classList.remove('locked');
-  part1Row.classList.add('unlocked');
-  part1Row.onclick = showPDF;
-  const tab2 = document.getElementById('tab2');
-  tab2.classList.remove('locked-tab');
-  setTimeout(()=>openM('success'), 350);
+
+  var options = {
+      "key": "rzp_live_SH9YHcyg04pPiW",  // ←
+      "amount": 5782, 
+      "currency": "INR",
+      "name": "Mahi's Notes",
+      "description": "Part 1 — Python Basics for AI",
+      "handler": function (response){
+
+          hasPaid = true;
+
+          closeM('payment');
+
+          document.getElementById('badge1').textContent = '✓ Unlocked';
+          document.getElementById('badge1').className = 'pbadge pb-unlocked';
+
+          const part1Row = document.getElementById('part1Row');
+          part1Row.classList.remove('locked');
+          part1Row.classList.add('unlocked');
+          part1Row.onclick = showPDF;
+
+          const tab2 = document.getElementById('tab2');
+          tab2.classList.remove('locked-tab');
+
+          openM('success');
+      },
+      "theme": {
+          "color": "#00e5a0"
+      }
+  };
+
+  var rzp1 = new Razorpay(options);
+  rzp1.open();
 }
+
+
 
 function afterPayment(){
   closeM('success');
