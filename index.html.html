@@ -3,8 +3,188 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <title>Mahi's Notes — Python for AI Beginners</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <!-- ══ FIREBASE ══ -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+             signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged,
+             updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // ══════════════════════════════════════════════════════
+    // 🔥 YOUR FIREBASE CONFIG — Replace with your own!
+    // Steps to get this:
+    // 1. Go to firebase.google.com
+    // 2. Create a new project called "mahi-notes"
+    // 3. Click "Web" app icon </>
+    // 4. Register app, copy the config below
+    // ══════════════════════════════════════════════════════
+    const firebaseConfig = {
+  apiKey: "AIzaSyBaMcB3vzxDoxxoVPiW5aeKm7N51k3TZ1E",
+  authDomain: "mahi-notes.firebaseapp.com",
+  projectId: "mahi-notes",
+  storageBucket: "mahi-notes.firebasestorage.app",
+  messagingSenderId: "941679481517",
+  appId: "1:941679481517:web:0703d962227a556535ac24",
+  measurementId: "G-ZP89JYGQNG"
+};
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const googleProvider = new GoogleAuthProvider();
+
+    // ══ WATCH LOGIN STATE ══
+    // This runs every time page loads — checks if user is already logged in
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // User is logged in
+        window.currentUser = user;
+        updateNavForLoggedIn(user);
+
+        // Check if this user has already paid
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists() && userDoc.data().hasPaid) {
+          window.hasPaid = true;
+          unlockPart1UI();
+          showToast('✅ Welcome back ' + (user.displayName || user.email) + '!');
+        }
+      } else {
+        // User is logged out
+        window.currentUser = null;
+        window.hasPaid = false;
+        updateNavForLoggedOut();
+      }
+    });
+
+    // ══ SIGNUP WITH EMAIL ══
+    window.doSignup = async function() {
+      const name  = document.getElementById('signupName').value.trim();
+      const email = document.getElementById('signupEmail').value.trim();
+      const pass  = document.getElementById('signupPass').value;
+
+      if (!name)  { showToast('⚠️ Please enter your name.'); return; }
+      if (!email) { showToast('⚠️ Please enter your email.'); return; }
+      if (pass.length < 6) { showToast('⚠️ Password must be at least 6 characters.'); return; }
+
+      const btn = document.getElementById('signupBtn');
+      btn.textContent = 'Creating account...';
+      btn.disabled = true;
+
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, pass);
+        await updateProfile(cred.user, { displayName: name });
+
+        // Save user to database
+        await setDoc(doc(db, "users", cred.user.uid), {
+          name: name,
+          email: email,
+          hasPaid: false,
+          createdAt: new Date().toISOString()
+        });
+
+        closeM('signup');
+        showToast('🎉 Account created! Welcome ' + name + '!');
+      } catch (err) {
+        if (err.code === 'auth/email-already-in-use') {
+          showToast('⚠️ This email is already registered. Please log in.');
+        } else {
+          showToast('⚠️ Error: ' + err.message);
+        }
+      } finally {
+        btn.textContent = 'Create Account →';
+        btn.disabled = false;
+      }
+    };
+
+    // ══ LOGIN WITH EMAIL ══
+    window.doLogin = async function() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const pass  = document.getElementById('loginPass').value;
+
+      if (!email) { showToast('⚠️ Please enter your email.'); return; }
+      if (!pass)  { showToast('⚠️ Please enter your password.'); return; }
+
+      const btn = document.getElementById('loginBtn');
+      btn.textContent = 'Logging in...';
+      btn.disabled = true;
+
+      try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        closeM('login');
+        // onAuthStateChanged handles the rest
+      } catch (err) {
+        if (err.code === 'auth/invalid-credential') {
+          showToast('⚠️ Wrong email or password.');
+        } else {
+          showToast('⚠️ Error: ' + err.message);
+        }
+      } finally {
+        btn.textContent = 'Log In →';
+        btn.disabled = false;
+      }
+    };
+
+    // ══ GOOGLE LOGIN ══
+    window.doGoogleLogin = async function() {
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const user = result.user;
+
+        // Save to database if first time
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (!userDoc.exists()) {
+          await setDoc(doc(db, "users", user.uid), {
+            name: user.displayName,
+            email: user.email,
+            hasPaid: false,
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        closeM('login');
+        closeM('signup');
+      } catch (err) {
+        showToast('⚠️ Google login failed. Try again.');
+        console.error(err);
+      }
+    };
+
+    // ══ LOGOUT ══
+    window.doLogout = async function() {
+      await signOut(auth);
+      window.hasPaid = false;
+      lockPart1UI();
+      showToast('👋 Logged out successfully.');
+    };
+
+    // ══ SAVE PAYMENT TO DATABASE ══
+    // Called after Razorpay confirms payment
+    window.savePaymentToDatabase = async function(paymentId) {
+      if (!window.currentUser) {
+        showToast('⚠️ Please log in first to save your access.');
+        return false;
+      }
+      try {
+        await setDoc(doc(db, "users", window.currentUser.uid), {
+          hasPaid: true,
+          paymentId: paymentId,
+          paidAt: new Date().toISOString()
+        }, { merge: true }); // merge:true keeps existing data
+
+        console.log('Payment saved to database ✓');
+        return true;
+      } catch (err) {
+        console.error('Failed to save payment:', err);
+        return false;
+      }
+    };
+
+  </script>
+
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700;800&display=swap" rel="stylesheet"/>
   <style>
     :root {
@@ -17,8 +197,6 @@
     *{margin:0;padding:0;box-sizing:border-box;}
     html{scroll-behavior:smooth;}
     body{font-family:'Cabinet Grotesk','DM Sans',sans-serif;background:var(--bg);color:var(--white);overflow-x:hidden;}
-
-    /* ── NAV ── */
     nav{position:fixed;top:0;left:0;right:0;z-index:200;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 6%;background:rgba(8,13,23,0.92);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);}
     .nav-logo{font-family:'Clash Display',sans-serif;font-weight:700;font-size:1.3rem;color:var(--white);text-decoration:none;display:flex;align-items:center;gap:0.5rem;}
     .logo-dot{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);animation:pdot 2s infinite;}
@@ -26,13 +204,17 @@
     .nav-links{display:flex;gap:2.2rem;list-style:none;}
     .nav-links a{color:var(--gray);text-decoration:none;font-size:0.88rem;font-weight:500;transition:color .2s;}
     .nav-links a:hover,.nav-links a.active{color:var(--white);}
-    .nav-actions{display:flex;gap:0.6rem;}
+    .nav-actions{display:flex;gap:0.6rem;align-items:center;}
     .btn-login{padding:.4rem 1.1rem;border:1px solid var(--border);background:transparent;color:var(--gray);border-radius:8px;cursor:pointer;font-family:'Cabinet Grotesk',sans-serif;font-size:.85rem;transition:all .2s;}
     .btn-login:hover{color:var(--white);border-color:rgba(255,255,255,.2);}
     .btn-signup{padding:.4rem 1.1rem;background:var(--green);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.85rem;font-weight:600;transition:all .2s;}
     .btn-signup:hover{background:var(--green2);transform:translateY(-1px);}
+    .nav-user{display:none;align-items:center;gap:.7rem;}
+    .nav-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--green),var(--blue));display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:var(--bg);}
+    .nav-uname{font-size:.83rem;color:var(--white);font-weight:500;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .btn-logout{padding:.35rem .9rem;border:1px solid rgba(248,113,113,.3);background:transparent;color:#f87171;border-radius:7px;cursor:pointer;font-size:.78rem;font-family:'Cabinet Grotesk',sans-serif;transition:all .2s;}
+    .btn-logout:hover{background:rgba(248,113,113,.1);}
 
-    /* ── HERO ── */
     #home{min-height:100vh;display:flex;align-items:center;padding:80px 6% 60px;position:relative;overflow:hidden;background:radial-gradient(ellipse 70% 60% at 70% 20%,rgba(0,229,160,0.07) 0%,transparent 65%),radial-gradient(ellipse 50% 50% at 10% 70%,rgba(59,130,246,0.05) 0%,transparent 60%),var(--bg);}
     .hero-grid{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:5rem;align-items:center;width:100%;}
     .hero-tag{display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border-green);border-radius:20px;padding:.3rem 1rem;font-size:.77rem;color:var(--green);font-weight:600;margin-bottom:1.4rem;background:var(--green-dim);}
@@ -71,13 +253,11 @@
     .price-note{font-size:.72rem;color:var(--gray);margin-top:1px;}
     .btn-ga{padding:.6rem 1.4rem;background:var(--green);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:'Clash Display',sans-serif;font-weight:700;font-size:.88rem;transition:all .2s;}
     .btn-ga:hover{background:var(--green2);transform:scale(1.03);}
-
     section{padding:90px 6%;position:relative;z-index:1;}
     .si{max-width:1100px;margin:0 auto;}
     .eyebrow{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:2.5px;color:var(--green);margin-bottom:.8rem;}
     .stitle{font-family:'Clash Display',sans-serif;font-size:clamp(1.7rem,2.8vw,2.4rem);font-weight:700;letter-spacing:-1px;margin-bottom:.9rem;line-height:1.2;}
     .ssub{color:var(--gray);font-size:.97rem;line-height:1.75;max-width:520px;}
-
     #notes{background:rgba(255,255,255,.013);}
     .note-card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:all .3s;max-width:600px;margin-top:2.5rem;}
     .note-card:hover{border-color:rgba(0,229,160,.22);box-shadow:0 20px 50px rgba(0,0,0,.35);}
@@ -95,11 +275,8 @@
     .dq{background:var(--gray2);}
     .pc span{color:var(--gray);}
     .note-footer{padding:.9rem 1.4rem;border-top:1px solid var(--border);display:flex;gap:.7rem;}
-    .btn-ps{flex:1;padding:.55rem .8rem;background:transparent;border:1px solid var(--border);color:var(--white);border-radius:8px;cursor:pointer;font-size:.83rem;font-family:'Cabinet Grotesk',sans-serif;transition:all .2s;}
-    .btn-ps:hover{border-color:rgba(255,255,255,.22);}
     .btn-pb{flex:1;padding:.55rem .8rem;background:var(--green);border:none;color:var(--bg);border-radius:8px;cursor:pointer;font-size:.83rem;font-family:'Clash Display',sans-serif;font-weight:600;transition:all .2s;}
     .btn-pb:hover{background:var(--green2);}
-
     #pdfViewer{display:none;margin-top:2rem;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--card);}
     .viewer-header{padding:1rem 1.4rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:.8rem;}
     .viewer-title{font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:600;display:flex;align-items:center;gap:.6rem;}
@@ -116,7 +293,6 @@
     .lock-sub{color:var(--gray);font-size:.9rem;line-height:1.68;max-width:360px;}
     .btn-unlock{padding:.75rem 2rem;background:var(--green);color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.95rem;font-weight:700;margin-top:.5rem;transition:all .2s;}
     .btn-unlock:hover{background:var(--green2);transform:translateY(-1px);}
-
     #how{background:var(--bg2);}
     .steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin-top:3rem;}
     .step-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.8rem;}
@@ -124,7 +300,6 @@
     .step-icon{font-size:1.6rem;margin-bottom:.8rem;display:block;}
     .step-title{font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:600;margin-bottom:.5rem;}
     .step-desc{font-size:.84rem;color:var(--gray);line-height:1.68;}
-
     #reviews{background:rgba(255,255,255,.013);}
     .reviews-layout{display:grid;grid-template-columns:1fr 1.6fr;gap:3rem;margin-top:3rem;align-items:start;}
     .write-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.6rem;}
@@ -163,7 +338,6 @@
     .rv-foot{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;}
     .rv-date{font-size:.72rem;color:var(--gray2);}
     .rv-verified{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600;background:var(--green-dim);border-radius:20px;padding:2px 8px;}
-
     #contact{background:var(--bg2);}
     .contact-grid{display:grid;grid-template-columns:1fr 1.2fr;gap:5rem;margin-top:3rem;align-items:start;}
     .c-blurb{color:var(--gray);font-size:.94rem;line-height:1.78;margin-bottom:2rem;}
@@ -181,14 +355,12 @@
     textarea{resize:vertical;min-height:100px;}
     .btn-send{padding:.85rem 2rem;background:var(--green);color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.93rem;font-weight:700;transition:all .2s;align-self:flex-start;}
     .btn-send:hover{background:var(--green2);transform:translateY(-1px);}
-
     footer{background:var(--bg);border-top:1px solid var(--border);padding:2.5rem 6%;text-align:center;}
     .flogo{font-family:'Clash Display',sans-serif;font-size:1.2rem;font-weight:700;margin-bottom:.6rem;display:flex;align-items:center;justify-content:center;gap:.5rem;}
     .flinks{display:flex;gap:2rem;justify-content:center;margin:1rem 0;flex-wrap:wrap;}
     .flinks a{color:var(--gray);text-decoration:none;font-size:.83rem;transition:color .2s;}
     .flinks a:hover{color:var(--white);}
     .fcopy{color:var(--gray2);font-size:.77rem;line-height:1.6;}
-
     .overlay{display:none;position:fixed;inset:0;z-index:999;background:rgba(5,10,20,.9);backdrop-filter:blur(10px);align-items:center;justify-content:center;}
     .overlay.open{display:flex;}
     .modal{background:var(--card);border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:2rem;width:90%;max-width:420px;box-shadow:0 40px 100px rgba(0,0,0,.6);position:relative;animation:slideUp .3s ease;max-height:90vh;overflow-y:auto;}
@@ -204,14 +376,15 @@
     .mbtn:hover{background:var(--green2);}
     .msw{text-align:center;margin-top:.9rem;font-size:.83rem;color:var(--gray);}
     .msw a{color:var(--green);text-decoration:none;cursor:pointer;font-weight:600;}
+    .btn-google{padding:.75rem;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:var(--white);border-radius:9px;cursor:pointer;font-family:'Cabinet Grotesk',sans-serif;font-size:.9rem;font-weight:500;width:100%;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:.6rem;margin-bottom:.7rem;}
+    .btn-google:hover{background:rgba(255,255,255,.1);}
+    .or-divider{display:flex;align-items:center;gap:.8rem;margin-bottom:.9rem;}
+    .or-divider::before,.or-divider::after{content:'';flex:1;height:1px;background:var(--border);}
+    .or-divider span{font-size:.75rem;color:var(--gray2);}
     .obox{background:rgba(255,255,255,.04);border-radius:10px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border);}
     .oline{display:flex;justify-content:space-between;font-size:.84rem;color:var(--gray);margin-bottom:.4rem;}
     .oline.tot{color:var(--white);font-weight:700;border-top:1px solid var(--border);padding-top:.6rem;margin-top:.4rem;font-size:.95rem;}
     .bonus-box{background:var(--green-dim);border:1px solid var(--border-green);border-radius:10px;padding:.9rem;margin-bottom:1rem;font-size:.82rem;color:var(--green);line-height:1.65;display:flex;gap:.6rem;align-items:flex-start;}
-    .ptabs{display:flex;gap:.5rem;margin-bottom:1rem;}
-    .ptab{flex:1;padding:.55rem .4rem;text-align:center;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:.8rem;color:var(--gray);transition:all .2s;}
-    .ptab span{display:block;font-size:1.1rem;margin-bottom:2px;}
-    .ptab.sel{border-color:var(--green);color:var(--green);background:var(--green-dim);}
     .btn-pay{padding:.85rem;background:linear-gradient(135deg,var(--green),var(--green2));color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:700;width:100%;transition:all .2s;margin-top:.5rem;}
     .btn-pay:hover{transform:translateY(-1px);box-shadow:0 10px 28px rgba(0,229,160,.28);}
     .psec{text-align:center;font-size:.71rem;color:var(--gray2);margin-top:.6rem;}
@@ -222,27 +395,23 @@
     .access-card{background:var(--green-dim);border:1px solid var(--border-green);border-radius:12px;padding:1rem;text-align:left;margin-bottom:1.2rem;}
     .ac-row{display:flex;align-items:center;gap:.8rem;padding:.5rem 0;}
     .ac-row+.ac-row{border-top:1px solid rgba(255,255,255,.06);}
-
     .toast{position:fixed;bottom:2rem;right:2rem;z-index:9999;background:var(--card2);border:1px solid var(--border-green);color:var(--white);padding:.9rem 1.4rem;border-radius:10px;font-size:.88rem;font-weight:500;box-shadow:0 10px 40px rgba(0,0,0,.4);transform:translateY(80px);opacity:0;transition:all .4s ease;pointer-events:none;max-width:320px;display:flex;gap:.6rem;align-items:center;}
     .toast.show{transform:translateY(0);opacity:1;}
-
-    /* LEGAL PAGE */
+    /* LEGAL */
     .legal-page{display:none;position:fixed;inset:0;z-index:998;background:var(--bg);overflow-y:auto;padding:80px 6% 60px;}
     .legal-page.open{display:block;}
     .legal-inner{max-width:800px;margin:0 auto;}
-    .legal-back{display:inline-flex;align-items:center;gap:.5rem;color:var(--green);font-size:.85rem;font-weight:600;cursor:pointer;margin-bottom:2rem;transition:gap .2s;}
-    .legal-back:hover{gap:.75rem;}
+    .legal-back{display:inline-flex;align-items:center;gap:.5rem;color:var(--green);font-size:.85rem;font-weight:600;cursor:pointer;margin-bottom:2rem;}
     .legal-page h1{font-family:'Clash Display',sans-serif;font-size:2.2rem;margin-bottom:.5rem;}
-    .legal-page .date{font-size:.82rem;color:var(--gray);margin-bottom:2.5rem;}
-    .legal-page h2{font-family:'Clash Display',sans-serif;font-size:1.4rem;margin-top:2.5rem;margin-bottom:1rem;color:var(--white);}
-    .legal-page h3{font-size:1.1rem;margin-top:1.8rem;margin-bottom:.7rem;color:var(--white);}
+    .legal-page .ldate{font-size:.82rem;color:var(--gray);margin-bottom:2.5rem;}
+    .legal-page h2{font-family:'Clash Display',sans-serif;font-size:1.4rem;margin-top:2.5rem;margin-bottom:1rem;}
     .legal-page p{font-size:.94rem;line-height:1.8;color:var(--gray);margin-bottom:1.2rem;}
     .legal-page ul{margin-left:1.5rem;margin-bottom:1.2rem;}
     .legal-page li{font-size:.94rem;line-height:1.8;color:var(--gray);margin-bottom:.5rem;}
     .legal-page strong{color:var(--white);}
-    .legal-page a{color:var(--green);text-decoration:none;}
-    .legal-page a:hover{text-decoration:underline;}
-
+    .legal-page a{color:var(--green);}
+    /* login required notice */
+    .login-required{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:10px;padding:.9rem 1rem;margin-bottom:1rem;font-size:.83rem;color:var(--gold);display:flex;gap:.6rem;align-items:flex-start;line-height:1.6;}
     @media(max-width:900px){.hero-grid,.reviews-layout,.contact-grid{grid-template-columns:1fr;}.steps-grid{grid-template-columns:1fr;}.nav-links{display:none;}section{padding:70px 4%;}}
     @media(max-width:600px){.frow{grid-template-columns:1fr;}nav{padding:0 4%;}}
   </style>
@@ -258,9 +427,16 @@
     <li><a href="#reviews">Reviews</a></li>
     <li><a href="#contact">Contact</a></li>
   </ul>
-  <div class="nav-actions">
+  <!-- Logged OUT buttons -->
+  <div class="nav-actions" id="navLoggedOut">
     <button class="btn-login" onclick="openM('login')">Log In</button>
     <button class="btn-signup" onclick="openM('signup')">Sign Up</button>
+  </div>
+  <!-- Logged IN user info -->
+  <div class="nav-actions nav-user" id="navLoggedIn">
+    <div class="nav-avatar" id="navAvatar">M</div>
+    <span class="nav-uname" id="navUname">User</span>
+    <button class="btn-logout" onclick="doLogout()">Logout</button>
   </div>
 </nav>
 
@@ -271,7 +447,7 @@
       <h1>Learn <span class="accent">Python for AI</span><br/>with Mahi's Notes</h1>
       <p class="hero-desc">Beginner-friendly notes that take you from zero to building your first AI models. Simple, clear, no fluff — written by Mahi.</p>
       <div class="hero-btns">
-        <button class="btn-primary" onclick="openM('payment')">Get Part 1 — ₹49</button>
+        <button class="btn-primary" onclick="handleGetPart1()">Get Part 1 — ₹49</button>
         <button class="btn-ghost" onclick="scrollToId('notes')">See What's Inside</button>
       </div>
       <div class="hero-pills">
@@ -283,7 +459,7 @@
     <div>
       <div class="hero-card">
         <div class="card-chip">📦 What You Get</div>
-        <div class="prow locked" id="part1Row" onclick="openM('payment')">
+        <div class="prow locked" id="part1Row" onclick="handleGetPart1()">
           <div class="prow-icon pi-gold">📄</div>
           <div class="prow-info">
             <div class="prow-title">Part 1 — Python Basics for AI</div>
@@ -312,7 +488,7 @@
             <div class="price-main">₹49</div>
             <div class="price-note">One payment · All future parts FREE</div>
           </div>
-          <button class="btn-ga" onclick="openM('payment')">Get Access →</button>
+          <button class="btn-ga" onclick="handleGetPart1()">Get Access →</button>
         </div>
       </div>
     </div>
@@ -323,22 +499,21 @@
   <div class="si">
     <p class="eyebrow">📚 Study Material</p>
     <h2 class="stitle">Python for AI — Beginners</h2>
-    <p class="ssub">My first notes, written as clearly as I wish someone had explained it to me when I started.</p>
-
+    <p class="ssub">My first notes, written as clearly as I wish someone had explained it to me.</p>
     <div class="note-card">
       <div class="note-top">🐍<span class="ntbadge">Pay Once</span></div>
       <div class="note-body">
         <div class="note-cat">Python for AI · Beginner</div>
         <div class="note-title">Python for AI Beginners — Complete Course</div>
-        <div class="note-desc">No prior coding experience needed. Part 1 available now. Part 2 unlocks FREE when uploaded — for everyone who bought Part 1.</div>
+        <div class="note-desc">No prior coding experience needed. Part 1 available now. Part 2 unlocks FREE when uploaded.</div>
         <div class="parts-list">
           <div class="pc"><span class="dot dy"></span><span>Part 1 — Python Basics (₹49 · unlocks now)</span></div>
-          <div class="pc"><span class="dot dq"></span><span>Part 2 — AI Concepts (Coming soon · FREE for Part 1 buyers)</span></div>
-          <div class="pc"><span class="dot dq"></span><span>Part 3+ — Future updates (FREE for Part 1 buyers)</span></div>
+          <div class="pc"><span class="dot dq"></span><span>Part 2 — AI Concepts (Coming soon · FREE for buyers)</span></div>
+          <div class="pc"><span class="dot dq"></span><span>Part 3+ — Future updates (FREE for buyers)</span></div>
         </div>
       </div>
       <div class="note-footer">
-        <button class="btn-pb" onclick="openM('payment')">Get Part 1 for ₹49 →</button>
+        <button class="btn-pb" id="noteBtnPart1" onclick="handleGetPart1()">Get Part 1 for ₹49 →</button>
       </div>
     </div>
 
@@ -347,22 +522,18 @@
         <div class="viewer-title">📄 <span id="viewerLabel">Part 1 — Python Basics for AI</span></div>
         <div class="viewer-tabs">
           <button class="vtab active" id="tab1" onclick="switchPart('part1')">Part 1</button>
-          <button class="vtab locked-tab" id="tab2" onclick="switchPart('part2')">Part 2 (Soon)</button>
+          <button class="vtab locked-tab" id="tab2">Part 2 (Soon)</button>
         </div>
       </div>
       <div class="pdf-frame-wrap">
-        <iframe
-          id="pdfFrame"
-          src="about:blank"
-          data-part1="https://drive.google.com/file/d/1Xwt5qqP_slZhCUhzbAMH-bxPKD67Mfxl/preview"
+        <iframe id="pdfFrame" src="about:blank"
+          data-part1="https://drive.google.com/file/d/1QIln0ld2ZnCinoVzUltzOoXXMC-Qy9lF/preview"
           data-part2="https://drive.google.com/file/d/YOUR_PART2_FILE_ID/preview"
-          allow="autoplay"
-          title="Mahi's Notes — PDF Viewer"
-        ></iframe>
+          allow="autoplay" title="Mahi's Notes PDF Viewer"></iframe>
         <div class="part2-overlay" id="p2overlay">
           <div class="lock-big">🔓</div>
           <div class="lock-title">Part 2 Coming Soon</div>
-          <div class="lock-sub">When Mahi uploads Part 2, it will automatically unlock here for you — at no extra cost. You already own it!</div>
+          <div class="lock-sub">When Mahi uploads Part 2, it unlocks here automatically for you — no extra cost!</div>
         </div>
       </div>
     </div>
@@ -373,25 +544,25 @@
   <div class="si">
     <p class="eyebrow">⚙️ How It Works</p>
     <h2 class="stitle">Pay Once, Get Everything</h2>
-    <p class="ssub">No complicated pricing. Pay ₹49 once, get all future parts free.</p>
+    <p class="ssub">Simple pricing. Pay ₹49 once, get all future parts free. Come back anytime.</p>
     <div class="steps-grid">
       <div class="step-card">
         <div class="step-num">01</div>
-        <span class="step-icon">💳</span>
-        <div class="step-title">Pay ₹49 for Part 1</div>
-        <div class="step-desc">One small payment of ₹49 unlocks Part 1 immediately. Read it directly in your browser.</div>
+        <span class="step-icon">👤</span>
+        <div class="step-title">Create Free Account</div>
+        <div class="step-desc">Sign up with email or Google. Your account remembers your purchase forever.</div>
       </div>
       <div class="step-card">
         <div class="step-num">02</div>
-        <span class="step-icon">📖</span>
-        <div class="step-title">Read Part 1 Now</div>
-        <div class="step-desc">Access Part 1 instantly after payment. All Python basics to get you started with AI.</div>
+        <span class="step-icon">💳</span>
+        <div class="step-title">Pay ₹49 Once</div>
+        <div class="step-desc">One payment unlocks Part 1 instantly and permanently. No subscriptions ever.</div>
       </div>
       <div class="step-card">
         <div class="step-num">03</div>
         <span class="step-icon">🚀</span>
-        <div class="step-title">Part 2+ Unlocks FREE</div>
-        <div class="step-desc">When Mahi uploads Part 2, Part 3, or any future updates — you get them all automatically. Zero extra payment.</div>
+        <div class="step-title">Access Forever</div>
+        <div class="step-desc">Log in anytime from any device and your notes are there. Future parts unlock automatically.</div>
       </div>
     </div>
   </div>
@@ -401,8 +572,7 @@
   <div class="si">
     <p class="eyebrow">⭐ Reviews</p>
     <h2 class="stitle">What Students Say</h2>
-    <p class="ssub">Real feedback. Bought the notes? Leave your review below.</p>
-
+    <p class="ssub">Real feedback from real students.</p>
     <div class="reviews-layout">
       <div>
         <div class="write-card">
@@ -416,15 +586,14 @@
             <button class="sbtn" onclick="setStar(5)">★</button>
           </div>
           <div class="rform">
-            <input id="rvName" type="text" placeholder="Your name (e.g. Rahul S.)"/>
+            <input id="rvName" type="text" placeholder="Your name"/>
             <input id="rvRole" type="text" placeholder="Your background (e.g. 1st Year CS...)"/>
-            <textarea id="rvText" placeholder="Write your review — what helped you?"></textarea>
+            <textarea id="rvText" placeholder="Write your review..."></textarea>
             <div class="buyer-note">🔒 Buyers automatically get a Verified Buyer badge.</div>
             <button class="btn-post" onclick="postReview()">Post Review →</button>
           </div>
         </div>
       </div>
-
       <div class="reviews-feed" id="reviewsFeed">
         <div class="rv-card">
           <div class="rv-top">
@@ -432,32 +601,23 @@
             <div class="rv-stars">★★★★★</div>
           </div>
           <div class="rv-text">"Best ₹49 I've spent. Part 1 is amazing — waiting for Part 2!"</div>
-          <div class="rv-foot">
-            <span class="rv-verified">✓ Verified Buyer</span>
-            <span class="rv-date">February 2025</span>
-          </div>
+          <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">February 2025</span></div>
         </div>
         <div class="rv-card">
           <div class="rv-top">
             <div class="rv-author"><div class="av av2">RS</div><div><div class="rv-name">Rohan Shah</div><div class="rv-role">Engineering Fresher</div></div></div>
             <div class="rv-stars">★★★★★</div>
           </div>
-          <div class="rv-text">"Zero coding background. These notes made Python actually make sense to me."</div>
-          <div class="rv-foot">
-            <span class="rv-verified">✓ Verified Buyer</span>
-            <span class="rv-date">January 2025</span>
-          </div>
+          <div class="rv-text">"Zero coding background. These notes made Python actually make sense!"</div>
+          <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">January 2025</span></div>
         </div>
         <div class="rv-card">
           <div class="rv-top">
             <div class="rv-author"><div class="av av3">PS</div><div><div class="rv-name">Priya Soni</div><div class="rv-role">BCA Student</div></div></div>
             <div class="rv-stars">★★★★★</div>
           </div>
-          <div class="rv-text">"Simple, clear, no jargon. Exactly what I needed. Worth every rupee!"</div>
-          <div class="rv-foot">
-            <span class="rv-verified">✓ Verified Buyer</span>
-            <span class="rv-date">January 2025</span>
-          </div>
+          <div class="rv-text">"Simple, clear, no jargon. Worth every rupee!"</div>
+          <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">January 2025</span></div>
         </div>
       </div>
     </div>
@@ -468,12 +628,12 @@
   <div class="si">
     <p class="eyebrow">✉️ Contact</p>
     <h2 class="stitle">Get In Touch</h2>
-    <p class="ssub">Questions, payment issues, or just want to say hi? I reply personally.</p>
+    <p class="ssub">Questions or payment issues? I reply personally.</p>
     <div class="contact-grid">
       <div>
-        <p class="c-blurb">I'm Mahi — I write these notes myself and handle everything personally.</p>
+        <p class="c-blurb">I'm Mahi — I write these notes and handle everything personally.</p>
         <div class="ci"><div class="c-icon">📧</div><div><div class="c-label">Email</div><div class="c-val">bhumeshsharma09@gmail.com</div></div></div>
-        <div class="ci"><div class="c-icon">💬</div><div><div class="c-label">WhatsApp</div><div class="c-val">+91 97XXX XXX00</div></div></div>
+        <div class="ci"><div class="c-icon">💬</div><div><div class="c-label">WhatsApp</div><div class="c-val">+91 XXXXX XXXXX</div></div></div>
         <div class="ci"><div class="c-icon">🕐</div><div><div class="c-label">Response Time</div><div class="c-val">Usually within a few hours</div></div></div>
       </div>
       <form class="cform" onsubmit="sendContact(event)">
@@ -496,7 +656,7 @@
     <a href="#how">How It Works</a><a href="#reviews">Reviews</a><a href="#contact">Contact</a>
     <a href="#" onclick="openLegal('refund');return false;">Refund Policy</a>
     <a href="#" onclick="openLegal('privacy');return false;">Privacy Policy</a>
-    <a href="#" onclick="openLegal('terms');return false;">Terms of Service</a>
+    <a href="#" onclick="openLegal('terms');return false;">Terms</a>
     <a href="#" onclick="openLegal('about');return false;">About</a>
   </div>
   <p class="fcopy">© 2026 Mahi's Notes · PDFs readable in-browser only · Made with ❤️ by Mahi</p>
@@ -504,270 +664,79 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- LEGAL PAGES -->
-<div class="legal-page" id="refundPage">
-  <div class="legal-inner">
-    <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
-    <h1>Refund & Return Policy</h1>
-    <p class="date">Last updated: February 17, 2026</p>
-    <p>Thank you for purchasing from Mahi's Notes. This policy explains our refund terms.</p>
-    
-    <h2>Digital Product Policy</h2>
-    <p>All products sold on this website are <strong>digital PDF notes</strong> accessible through your browser. Because digital products are instantly accessible after payment, we have a limited refund policy.</p>
-    
-    <h2>Refund Eligibility</h2>
-    <p>You may request a refund within <strong>24 hours of purchase</strong> if:</p>
-    <ul>
-      <li>The content is significantly different from what was described</li>
-      <li>You experienced technical issues preventing access</li>
-      <li>Payment was processed but access was not granted</li>
-    </ul>
-    
-    <h2>Non-Refundable Cases</h2>
-    <p>Refunds will <strong>not</strong> be provided if:</p>
-    <ul>
-      <li>More than 24 hours have passed since purchase</li>
-      <li>You simply changed your mind after accessing the notes</li>
-      <li>You violated our Terms of Service</li>
-    </ul>
-    
-    <h2>How to Request a Refund</h2>
-    <p>Email <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a> within 24 hours with your order details. Refunds are processed within 5-7 business days.</p>
-    
-    <h2>Questions?</h2>
-    <p>Contact us at <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
-  </div>
-</div>
-
-<div class="legal-page" id="privacyPage">
-  <div class="legal-inner">
-    <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
-    <h1>Privacy Policy</h1>
-    <p class="date">Last updated: February 17, 2026</p>
-    <p>Mahi's Notes ("we", "our", "us") respects your privacy. This policy explains how we collect and use your information.</p>
-    
-    <h2>Information We Collect</h2>
-    <h3>Personal Information</h3>
-    <p>When you create an account or make a purchase, we collect:</p>
-    <ul>
-      <li>Name and email address</li>
-      <li>Payment information (processed securely by Razorpay)</li>
-      <li>IP address and browser type</li>
-    </ul>
-    
-    <h3>Usage Data</h3>
-    <p>We collect data on how you interact with our site to improve our service.</p>
-    
-    <h2>How We Use Your Information</h2>
-    <p>We use your information to:</p>
-    <ul>
-      <li>Provide access to purchased notes</li>
-      <li>Process payments</li>
-      <li>Send order confirmations and updates</li>
-      <li>Respond to your inquiries</li>
-      <li>Improve our website and services</li>
-    </ul>
-    
-    <h2>Data Security</h2>
-    <p>We use industry-standard security measures to protect your data. Payment information is encrypted and processed by Razorpay — we never store your card details.</p>
-    
-    <h2>Third-Party Services</h2>
-    <p>We use the following third-party services:</p>
-    <ul>
-      <li><strong>Razorpay</strong> — Payment processing</li>
-      <li><strong>Google Drive</strong> — PDF hosting</li>
-    </ul>
-    <p>These services have their own privacy policies.</p>
-    
-    <h2>Your Rights</h2>
-    <p>You can:</p>
-    <ul>
-      <li>Access your personal data</li>
-      <li>Request data correction or deletion</li>
-      <li>Opt out of marketing emails</li>
-    </ul>
-    
-    <h2>Contact Us</h2>
-    <p>For privacy concerns, email <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
-  </div>
-</div>
-
-<div class="legal-page" id="termsPage">
-  <div class="legal-inner">
-    <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
-    <h1>Terms of Service</h1>
-    <p class="date">Last updated: February 17, 2026</p>
-    <p>By using Mahi's Notes, you agree to these terms.</p>
-    
-    <h2>Use of Service</h2>
-    <p>Mahi's Notes provides digital educational content. You may:</p>
-    <ul>
-      <li>Access purchased notes in your browser</li>
-      <li>Use the content for personal study</li>
-    </ul>
-    
-    <h2>Prohibited Activities</h2>
-    <p>You may <strong>not</strong>:</p>
-    <ul>
-      <li>Share your account with others</li>
-      <li>Download, copy, or redistribute the notes</li>
-      <li>Use automated tools to access the site</li>
-      <li>Reverse engineer or scrape content</li>
-      <li>Resell or commercially exploit the notes</li>
-    </ul>
-    
-    <h2>Intellectual Property</h2>
-    <p>All content is owned by Mahi (the author). Purchasing grants you a <strong>personal, non-transferable license</strong> to view the notes. You do not own the content.</p>
-    
-    <h2>Account Termination</h2>
-    <p>We may suspend or terminate accounts that violate these terms without refund.</p>
-    
-    <h2>Payment Terms</h2>
-    <ul>
-      <li>All payments are in Indian Rupees (INR)</li>
-      <li>Prices include 18% GST</li>
-      <li>Payments are processed by Razorpay</li>
-      <li>One-time payment grants lifetime access to purchased part + future parts</li>
-    </ul>
-    
-    <h2>Future Content</h2>
-    <p>Purchasing Part 1 grants you access to Part 2 and all future parts when uploaded — at no additional cost.</p>
-    
-    <h2>Disclaimer</h2>
-    <p>The notes are provided "as is". While we strive for accuracy, we make no guarantees about:</p>
-    <ul>
-      <li>Completeness or accuracy of content</li>
-      <li>Suitability for your specific needs</li>
-      <li>Exam success or job outcomes</li>
-    </ul>
-    
-    <h2>Limitation of Liability</h2>
-    <p>We are not liable for any damages arising from use of our service.</p>
-    
-    <h2>Changes to Terms</h2>
-    <p>We may update these terms. Continued use after changes means acceptance.</p>
-    
-    <h2>Contact</h2>
-    <p>Questions? Email <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
-  </div>
-</div>
-
-<div class="legal-page" id="aboutPage">
-  <div class="legal-inner">
-    <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
-    <h1>About Mahi's Notes</h1>
-    <p class="date">Last updated: February 17, 2026</p>
-    
-    <h2>Who I Am</h2>
-    <p>Hi! I'm Mahi — a student and self-taught coder passionate about making learning easier for others.</p>
-    <p>I started creating these notes because when I was learning Python for AI, I found most resources either too complicated or too basic. I wanted something in between — clear, simple, and practical.</p>
-    
-    <h2>What I Offer</h2>
-    <p>Right now, I offer:</p>
-    <ul>
-      <li><strong>Part 1 — Python Basics for AI</strong> (available now for ₹49)</li>
-      <li><strong>Part 2 — AI Concepts</strong> (coming soon — FREE for Part 1 buyers)</li>
-      <li><strong>Future parts</strong> (also FREE for Part 1 buyers)</li>
-    </ul>
-    
-    <h2>Why Pay Once, Get Everything?</h2>
-    <p>I believe in fair pricing. You pay ₹49 once, and you get everything I create in this series — forever. No subscriptions, no upsells, no tricks.</p>
-    
-    <h2>How It Works</h2>
-    <p>All notes are PDFs hosted on Google Drive. You read them directly in your browser — no downloads, no piracy risk. Simple and clean.</p>
-    
-    <h2>Business Details</h2>
-    <p><strong>Owner:</strong> Mahi<br/>
-    <strong>Email:</strong> <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a><br/>
-    <strong>WhatsApp:</strong> +91 97XXX XXX00<br/>
-    <strong>Location:</strong> India</p>
-    
-    <h2>My Promise</h2>
-    <ul>
-      <li>Clear, beginner-friendly content</li>
-      <li>Honest pricing — no hidden costs</li>
-      <li>Personal support — I reply to every email</li>
-      <li>Continuous updates — you get future parts free</li>
-    </ul>
-    
-    <h2>Get In Touch</h2>
-    <p>Questions, feedback, or just want to say hi? Email me at <a href="bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a> — I read and reply to everything personally.</p>
-  </div>
-</div>
-
-<!-- MODALS -->
+<!-- LOGIN MODAL -->
 <div class="overlay" id="loginOverlay">
   <div class="modal">
     <button class="mx" onclick="closeM('login')">✕</button>
     <div class="mt">Welcome Back 👋</div>
     <div class="ms">Log in to access your purchased notes.</div>
+    <button class="btn-google" onclick="doGoogleLogin()">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Continue with Google
+    </button>
+    <div class="or-divider"><span>or</span></div>
     <div class="mf">
-      <div class="fg"><label>Email</label><input type="email" placeholder="you@email.com"/></div>
-      <div class="fg"><label>Password</label><input type="password" placeholder="Your password"/></div>
-      <button class="mbtn" onclick="doLogin()">Log In →</button>
+      <div class="fg"><label>Email</label><input id="loginEmail" type="email" placeholder="you@email.com"/></div>
+      <div class="fg"><label>Password</label><input id="loginPass" type="password" placeholder="Your password"/></div>
+      <button class="mbtn" id="loginBtn" onclick="doLogin()">Log In →</button>
     </div>
     <div class="msw">No account? <a onclick="switchM('login','signup')">Sign up free</a></div>
   </div>
 </div>
 
+<!-- SIGNUP MODAL -->
 <div class="overlay" id="signupOverlay">
   <div class="modal">
     <button class="mx" onclick="closeM('signup')">✕</button>
     <div class="mt">Create Account 🐍</div>
-    <div class="ms">Sign up to track your purchases.</div>
+    <div class="ms">Sign up to save your purchase and access notes anytime.</div>
+    <button class="btn-google" onclick="doGoogleLogin()">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Continue with Google
+    </button>
+    <div class="or-divider"><span>or</span></div>
     <div class="mf">
-      <div class="fg"><label>Full Name</label><input type="text" placeholder="Your name"/></div>
-      <div class="fg"><label>Email</label><input type="email" placeholder="you@email.com"/></div>
-      <div class="fg"><label>Password</label><input type="password" placeholder="Create a password"/></div>
-      <button class="mbtn" onclick="doSignup()">Create Account →</button>
+      <div class="fg"><label>Full Name</label><input id="signupName" type="text" placeholder="Your name"/></div>
+      <div class="fg"><label>Email</label><input id="signupEmail" type="email" placeholder="you@email.com"/></div>
+      <div class="fg"><label>Password</label><input id="signupPass" type="password" placeholder="Min 6 characters"/></div>
+      <button class="mbtn" id="signupBtn" onclick="doSignup()">Create Account →</button>
     </div>
     <div class="msw">Already have an account? <a onclick="switchM('signup','login')">Log in</a></div>
   </div>
 </div>
 
+<!-- PAYMENT MODAL -->
 <div class="overlay" id="paymentOverlay">
   <div class="modal wide">
     <button class="mx" onclick="closeM('payment')">✕</button>
     <div class="mt">Get Part 1 — Python Basics</div>
-    <div class="ms">One-time payment · All future parts FREE.</div>
+    <div class="ms">One-time payment · Access forever from any device.</div>
     <div class="bonus-box">
       <span>🎁</span>
-      <span>After paying, <strong>Part 1 unlocks now</strong>. When Mahi uploads Part 2 and beyond, you get them <strong>automatically — zero extra payment, ever.</strong></span>
+      <span>Pay once → <strong>Part 1 unlocks now</strong>. Future parts unlock automatically — <strong>zero extra payment, ever.</strong></span>
     </div>
     <div class="obox">
       <div class="oline"><span>Part 1 — Python Basics for AI</span><span>₹49</span></div>
       <div class="oline"><span>GST (18%)</span><span>₹8.82</span></div>
       <div class="oline tot"><span>Total</span><span>₹57.82</span></div>
     </div>
-    <div class="ptabs">
-      <div class="ptab sel" onclick="selPay(this)"><span>💳</span>Card</div>
-      <div class="ptab" onclick="selPay(this)"><span>📱</span>UPI</div>
-      <div class="ptab" onclick="selPay(this)"><span>🏦</span>Netbanking</div>
-    </div>
-    <div class="mf">
-      <div class="fg"><label>Cardholder Name</label><input type="text" placeholder="Your full name"/></div>
-      <div class="fg"><label>Card Number</label><input type="text" placeholder="4242 4242 4242 4242"/></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-        <div class="fg"><label>Expiry</label><input type="text" placeholder="MM / YY"/></div>
-        <div class="fg"><label>CVV</label><input type="text" placeholder="123"/></div>
-      </div>
-    </div>
-    <button class="btn-pay" onclick="doPayment()">🔒 Pay ₹57.82 Securely</button>
-    <div class="psec">Powered by Razorpay · SSL Encrypted</div>
+    <button class="btn-pay" onclick="doPayment()">🔒 Pay ₹57.82 with Razorpay</button>
+    <div class="psec">SSL Encrypted · Notes never download to your device</div>
   </div>
 </div>
 
+<!-- SUCCESS MODAL -->
 <div class="overlay" id="successOverlay">
   <div class="modal wide">
     <button class="mx" onclick="closeM('success')">✕</button>
     <div class="succ-inner">
       <div class="succ-icon">🎉</div>
       <div class="succ-title">Payment Successful!</div>
-      <div class="succ-sub">You now have access to Part 1. When Part 2 drops, you'll get it automatically.</div>
+      <div class="succ-sub">Your purchase is saved to your account. Log in anytime from any device to access your notes.</div>
       <div class="access-card">
         <div class="ac-row">
           <div class="prow-icon pi-green">📄</div>
-          <div class="prow-info"><div class="prow-title">Part 1 — Python Basics</div><div class="prow-sub">Just unlocked ✓</div></div>
+          <div class="prow-info"><div class="prow-title">Part 1 — Python Basics</div><div class="prow-sub">Unlocked ✓ — saved to your account</div></div>
           <span class="pbadge pb-unlocked">✓ Unlocked</span>
         </div>
         <div class="ac-row">
@@ -781,10 +750,36 @@
   </div>
 </div>
 
+<!-- LEGAL PAGES -->
+<div class="legal-page" id="refundPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>Refund Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>All products are digital PDF notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a> with your order details.</p>
+</div></div>
+
+<div class="legal-page" id="privacyPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>Privacy Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>We collect name, email, and payment info to provide our service. Payments are processed by Razorpay. We never store card details. Your data is never sold to third parties. Contact: <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
+</div></div>
+
+<div class="legal-page" id="termsPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>Terms of Service</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>By purchasing, you get a personal, non-transferable license to view the notes. You may not share, copy, redistribute, or resell the content. One-time payment grants lifetime personal access including future parts.</p>
+</div></div>
+
+<div class="legal-page" id="aboutPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>About Mahi's Notes</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹49 once and get everything — no subscriptions, no hidden costs. Email: <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
+</div></div>
+
 <script>
 let hasPaid = false;
 let selectedStars = 0;
 
+// NAV SCROLL
 window.addEventListener('scroll', () => {
   const ids = ['home','notes','how','reviews','contact'];
   const links = document.querySelectorAll('.nav-links a');
@@ -800,6 +795,7 @@ window.addEventListener('scroll', () => {
 });
 function scrollToId(id){ document.getElementById(id).scrollIntoView({behavior:'smooth'}); }
 
+// MODALS
 const OVS = { login:'loginOverlay', signup:'signupOverlay', payment:'paymentOverlay', success:'successOverlay' };
 function openM(k){ document.getElementById(OVS[k]).classList.add('open'); document.body.style.overflow='hidden'; }
 function closeM(k){ document.getElementById(OVS[k]).classList.remove('open'); document.body.style.overflow=''; }
@@ -808,6 +804,66 @@ document.querySelectorAll('.overlay').forEach(el => {
   el.addEventListener('click', e => { if(e.target===el){ el.classList.remove('open'); document.body.style.overflow=''; } });
 });
 
+// HANDLE GET PART 1 — checks if logged in first
+function handleGetPart1(){
+  if(window.hasPaid){
+    showPDF();
+    return;
+  }
+  if(!window.currentUser){
+    // Not logged in — show signup first
+    closeM('payment');
+    openM('signup');
+    showToast('👆 Please create an account first to save your purchase!');
+    return;
+  }
+  // Logged in but not paid — show payment
+  openM('payment');
+}
+
+// UPDATE NAV when logged in
+function updateNavForLoggedIn(user){
+  document.getElementById('navLoggedOut').style.display = 'none';
+  const navIn = document.getElementById('navLoggedIn');
+  navIn.style.display = 'flex';
+  const name = user.displayName || user.email;
+  document.getElementById('navUname').textContent = name.split(' ')[0];
+  document.getElementById('navAvatar').textContent = name[0].toUpperCase();
+}
+
+// UPDATE NAV when logged out
+function updateNavForLoggedOut(){
+  document.getElementById('navLoggedOut').style.display = 'flex';
+  document.getElementById('navLoggedIn').style.display = 'none';
+}
+
+// UNLOCK UI after payment confirmed
+function unlockPart1UI(){
+  window.hasPaid = true;
+  document.getElementById('badge1').textContent = '✓ Unlocked';
+  document.getElementById('badge1').className = 'pbadge pb-unlocked';
+  const part1Row = document.getElementById('part1Row');
+  part1Row.classList.remove('locked');
+  part1Row.classList.add('unlocked');
+  part1Row.onclick = showPDF;
+  document.getElementById('noteBtnPart1').textContent = '📖 Read Part 1 Now';
+  document.getElementById('noteBtnPart1').onclick = showPDF;
+}
+
+// LOCK UI
+function lockPart1UI(){
+  window.hasPaid = false;
+  document.getElementById('badge1').textContent = '🔒 ₹49';
+  document.getElementById('badge1').className = 'pbadge pb-locked';
+  const part1Row = document.getElementById('part1Row');
+  part1Row.classList.add('locked');
+  part1Row.classList.remove('unlocked');
+  part1Row.onclick = handleGetPart1;
+  document.getElementById('noteBtnPart1').textContent = 'Get Part 1 for ₹49 →';
+  document.getElementById('noteBtnPart1').onclick = handleGetPart1;
+}
+
+// PDF VIEWER
 function showPDF(){
   const viewer = document.getElementById('pdfViewer');
   viewer.style.display = 'block';
@@ -819,64 +875,56 @@ function switchPart(part){
   const frame = document.getElementById('pdfFrame');
   const overlay = document.getElementById('p2overlay');
   const tab1 = document.getElementById('tab1');
-  const tab2 = document.getElementById('tab2');
   const label = document.getElementById('viewerLabel');
-
   if(part === 'part1'){
-    const src = frame.getAttribute('data-part1');
-    frame.src = src;
+    frame.src = frame.getAttribute('data-part1');
     overlay.classList.remove('show');
-    tab1.classList.add('active'); tab2.classList.remove('active');
+    tab1.classList.add('active');
     label.textContent = 'Part 1 — Python Basics for AI';
-  } else {
-    tab2.classList.add('active'); tab1.classList.remove('active');
-    label.textContent = 'Part 2 — AI Concepts';
-    overlay.classList.add('show');
   }
 }
 
-function selPay(el){
-  document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('sel'));
-  el.classList.add('sel');
-}
-
+// RAZORPAY PAYMENT
 function doPayment(){
+  if(!window.currentUser){
+    closeM('payment');
+    openM('signup');
+    showToast('👆 Please create an account first!');
+    return;
+  }
 
   var options = {
-      "key": "rzp_live_SH9YHcyg04pPiW",  // ←
-      "amount": 5782, 
-      "currency": "INR",
-      "name": "Mahi's Notes",
-      "description": "Part 1 — Python Basics for AI",
-      "handler": function (response){
-
-          hasPaid = true;
-
-          closeM('payment');
-
-          document.getElementById('badge1').textContent = '✓ Unlocked';
-          document.getElementById('badge1').className = 'pbadge pb-unlocked';
-
-          const part1Row = document.getElementById('part1Row');
-          part1Row.classList.remove('locked');
-          part1Row.classList.add('unlocked');
-          part1Row.onclick = showPDF;
-
-          const tab2 = document.getElementById('tab2');
-          tab2.classList.remove('locked-tab');
-
-          openM('success');
-      },
-      "theme": {
-          "color": "#00e5a0"
+    key: "rzp_live_SH9YHcyg04pPiW", // Your live key
+    amount: 5782,
+    currency: "INR",
+    name: "Mahi's Notes",
+    description: "Part 1 — Python Basics for AI",
+    prefill: {
+      name: window.currentUser.displayName || '',
+      email: window.currentUser.email || ''
+    },
+    handler: async function(response){
+      showToast('⏳ Saving your purchase...');
+      // Save payment to Firebase database
+      const saved = await window.savePaymentToDatabase(response.razorpay_payment_id);
+      if(saved){
+        unlockPart1UI();
+        closeM('payment');
+        setTimeout(()=>openM('success'), 350);
+      } else {
+        showToast('⚠️ Payment done but saving failed. Contact support with payment ID: ' + response.razorpay_payment_id);
       }
+    },
+    modal: {
+      ondismiss: function(){ showToast('Payment cancelled.'); }
+    },
+    theme: { color: "#00e5a0" }
   };
 
-  var rzp1 = new Razorpay(options);
-  rzp1.open();
+  var rzp = new Razorpay(options);
+  rzp.open();
+  closeM('payment');
 }
-
-
 
 function afterPayment(){
   closeM('success');
@@ -884,9 +932,7 @@ function afterPayment(){
   showToast('🎉 Part 1 unlocked! Happy learning 🐍');
 }
 
-function doLogin(){ closeM('login'); showToast('✅ Logged in! Welcome back.'); }
-function doSignup(){ closeM('signup'); showToast('🎉 Account created! Welcome.'); }
-
+// REVIEWS
 function setStar(n){
   selectedStars = n;
   document.querySelectorAll('.sbtn').forEach((b,i)=>b.classList.toggle('lit', i<n));
@@ -899,31 +945,23 @@ function postReview(){
   if(!name){ showToast('⚠️ Please enter your name.'); return; }
   if(!text){ showToast('⚠️ Please write your review.'); return; }
   if(selectedStars === 0){ showToast('⚠️ Please pick a star rating.'); return; }
-
   const stars = '★'.repeat(selectedStars)+'☆'.repeat(5-selectedStars);
   const initials = name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2);
   const dateStr = new Date().toLocaleDateString('en-IN',{month:'long',year:'numeric'});
-  const isVerified = hasPaid;
-
   const card = document.createElement('div');
   card.className = 'rv-card';
   card.innerHTML = `
     <div class="rv-top">
-      <div class="rv-author">
-        <div class="av av-new">${initials}</div>
-        <div><div class="rv-name">${name}</div><div class="rv-role">${role||'Student'}</div></div>
-      </div>
+      <div class="rv-author"><div class="av av-new">${initials}</div>
+      <div><div class="rv-name">${name}</div><div class="rv-role">${role||'Student'}</div></div></div>
       <div class="rv-stars">${stars}</div>
     </div>
     <div class="rv-text">"${text}"</div>
     <div class="rv-foot">
-      ${isVerified ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
+      ${window.hasPaid ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
       <span class="rv-date">${dateStr}</span>
-    </div>
-  `;
-  const feed = document.getElementById('reviewsFeed');
-  feed.insertBefore(card, feed.firstChild);
-
+    </div>`;
+  document.getElementById('reviewsFeed').insertBefore(card, document.getElementById('reviewsFeed').firstChild);
   document.getElementById('rvName').value='';
   document.getElementById('rvRole').value='';
   document.getElementById('rvText').value='';
@@ -931,25 +969,27 @@ function postReview(){
   showToast('✅ Review posted! Thank you 🙏');
 }
 
+// CONTACT
 function sendContact(e){
   e.preventDefault();
   showToast('✅ Message sent! Mahi will reply soon.');
   e.target.reset();
 }
 
+// TOAST
 function showToast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),3800);
 }
 
+// LEGAL
 function openLegal(page){
-  const pages = {refund:'refundPage',privacy:'privacyPage',terms:'termsPage',about:'aboutPage'};
+  const pages={refund:'refundPage',privacy:'privacyPage',terms:'termsPage',about:'aboutPage'};
   document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
   document.getElementById(pages[page]).classList.add('open');
   window.scrollTo(0,0);
 }
-
 function closeLegal(){
   document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
 }
