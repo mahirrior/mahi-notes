@@ -12,7 +12,7 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
              signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged,
              updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, orderBy, onSnapshot, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     // ══════════════════════════════════════════════════════
     // 🔥 YOUR FIREBASE CONFIG — Replace with your own!
@@ -35,6 +35,52 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
     const googleProvider = new GoogleAuthProvider();
+    // Load reviews from Firebase
+window.firebaseDB = db;
+const reviewsQuery = query(collection(db, "reviews"), orderBy("timestamp", "desc"), limit(20));
+onSnapshot(reviewsQuery, (snapshot) => {
+  snapshot.forEach((docSnap) => {
+    const review = docSnap.data();
+    if (document.getElementById('review-' + docSnap.id)) return;
+    const card = createReviewCard(review, docSnap.id);
+    const feed = document.getElementById('reviewsFeed');
+    if (feed) feed.insertBefore(card, feed.firstChild);
+  });
+});
+function createReviewCard(review, reviewId) {
+  const stars = '★'.repeat(review.stars) + '☆'.repeat(5 - review.stars);
+  const initials = review.name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2);
+  const dateStr = new Date(review.timestamp).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const card = document.createElement('div');
+  card.className = 'rv-card';
+  card.id = 'review-' + reviewId;
+  card.innerHTML = `
+    <div class="rv-top">
+      <div class="rv-author">
+        <div class="av av-new">${initials}</div>
+        <div><div class="rv-name">${review.name}</div><div class="rv-role">${review.role}</div></div>
+      </div>
+      <div class="rv-stars">${stars}</div>
+    </div>
+    <div class="rv-text">"${review.text}"</div>
+    <div class="rv-foot">
+      ${review.verified ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
+      <span class="rv-date">${dateStr}</span>
+    </div>`;
+  return card;
+}
+// Save review function
+window.postReviewToFirebase = async function(reviewData) {
+  await addDoc(collection(db, "reviews"), {
+    name: reviewData.name,
+    role: reviewData.role,
+    text: reviewData.text,
+    stars: reviewData.stars,
+    verified: reviewData.verified,
+    timestamp: new Date().toISOString(),
+    createdAt: new Date()
+  });
+};
 
     // ══ WATCH LOGIN STATE ══
     // This runs every time page loads — checks if user is already logged in
@@ -938,34 +984,27 @@ function setStar(n){
 }
 
 function postReview(){
+  async function postReview(){
   const name = document.getElementById('rvName').value.trim();
   const role = document.getElementById('rvRole').value.trim();
   const text = document.getElementById('rvText').value.trim();
-  if(!name){ showToast('⚠️ Please enter your name.'); return; }
-  if(!text){ showToast('⚠️ Please write your review.'); return; }
-  if(selectedStars === 0){ showToast('⚠️ Please pick a star rating.'); return; }
-  const stars = '★'.repeat(selectedStars)+'☆'.repeat(5-selectedStars);
-  const initials = name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2);
-  const dateStr = new Date().toLocaleDateString('en-IN',{month:'long',year:'numeric'});
-  const card = document.createElement('div');
-  card.className = 'rv-card';
-  card.innerHTML = `
-    <div class="rv-top">
-      <div class="rv-author"><div class="av av-new">${initials}</div>
-      <div><div class="rv-name">${name}</div><div class="rv-role">${role||'Student'}</div></div></div>
-      <div class="rv-stars">${stars}</div>
-    </div>
-    <div class="rv-text">"${text}"</div>
-    <div class="rv-foot">
-      ${window.hasPaid ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
-      <span class="rv-date">${dateStr}</span>
-    </div>`;
-  document.getElementById('reviewsFeed').insertBefore(card, document.getElementById('reviewsFeed').firstChild);
+  
+  if(!name || !text || selectedStars === 0){ 
+    showToast('⚠️ Please fill all fields'); 
+    return; 
+  }
+
+  await window.postReviewToFirebase({
+    name, role: role || 'Student', text, 
+    stars: selectedStars, verified: window.hasPaid
+  });
+
   document.getElementById('rvName').value='';
   document.getElementById('rvRole').value='';
   document.getElementById('rvText').value='';
   setStar(0);
-  showToast('✅ Review posted! Thank you 🙏');
+  showToast('✅ Review posted!');
+}
 }
 
 // CONTACT
