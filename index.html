@@ -12,7 +12,7 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
              signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged,
              updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     // ══════════════════════════════════════════════════════
     // 🔥 YOUR FIREBASE CONFIG — Replace with your own!
@@ -23,14 +23,13 @@
     // 4. Register app, copy the config below
     // ══════════════════════════════════════════════════════
     const firebaseConfig = {
-  apiKey: "AIzaSyBaMcB3vzxDoxxoVPiW5aeKm7N51k3TZ1E",
-  authDomain: "mahi-notes.firebaseapp.com",
-  projectId: "mahi-notes",
-  storageBucket: "mahi-notes.firebasestorage.app",
-  messagingSenderId: "941679481517",
-  appId: "1:941679481517:web:0703d962227a556535ac24",
-  measurementId: "G-ZP89JYGQNG"
-};
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
@@ -188,7 +187,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700;800&display=swap" rel="stylesheet"/>
   <style>
     :root {
-      --bg:#080d17; --bg2:#0e1623; --card:#111c2e; --card2:#162036;
+      --bg:#0a150f; --bg2:#0f1e15; --card:#132820; --card2:#1a3028;
       --green:#00e5a0; --green2:#00c48a; --green-dim:rgba(0,229,160,0.10);
       --green-glow:rgba(0,229,160,0.22); --blue:#3b82f6;
       --gold:#fbbf24; --white:#f0f6ff; --gray:#7a8fa8; --gray2:#4a5f75;
@@ -447,7 +446,7 @@
       <h1>Learn <span class="accent">Python for AI</span><br/>with Mahi's Notes</h1>
       <p class="hero-desc">Beginner-friendly notes that take you from zero to building your first AI models. Simple, clear, no fluff — written by Mahi.</p>
       <div class="hero-btns">
-        <button class="btn-primary" onclick="handleGetPart1()">Get Part 1 — ₹49</button>
+        <button class="btn-primary" onclick="handleGetPart1()">Get Part 1 — ₹30</button>
         <button class="btn-ghost" onclick="scrollToId('notes')">See What's Inside</button>
       </div>
       <div class="hero-pills">
@@ -465,7 +464,7 @@
             <div class="prow-title">Part 1 — Python Basics for AI</div>
             <div class="prow-sub">Variables, loops, functions, NumPy intro</div>
           </div>
-          <span class="pbadge pb-locked" id="badge1">🔒 ₹49</span>
+          <span class="pbadge pb-locked" id="badge1">🔒 ₹30</span>
         </div>
         <div class="coming-row">
           <div class="prow-icon pi-gray">🤖</div>
@@ -485,7 +484,7 @@
         </div>
         <div class="price-row">
           <div>
-            <div class="price-main">₹49</div>
+            <div class="price-main">₹30</div>
             <div class="price-note">One payment · All future parts FREE</div>
           </div>
           <button class="btn-ga" onclick="handleGetPart1()">Get Access →</button>
@@ -507,13 +506,13 @@
         <div class="note-title">Python for AI Beginners — Complete Course</div>
         <div class="note-desc">No prior coding experience needed. Part 1 available now. Part 2 unlocks FREE when uploaded.</div>
         <div class="parts-list">
-          <div class="pc"><span class="dot dy"></span><span>Part 1 — Python Basics (₹49 · unlocks now)</span></div>
+          <div class="pc"><span class="dot dy"></span><span>Part 1 — Python Basics (₹30 · unlocks now)</span></div>
           <div class="pc"><span class="dot dq"></span><span>Part 2 — AI Concepts (Coming soon · FREE for buyers)</span></div>
           <div class="pc"><span class="dot dq"></span><span>Part 3+ — Future updates (FREE for buyers)</span></div>
         </div>
       </div>
       <div class="note-footer">
-        <button class="btn-pb" id="noteBtnPart1" onclick="handleGetPart1()">Get Part 1 for ₹49 →</button>
+        <button class="btn-pb" id="noteBtnPart1" onclick="handleGetPart1()">Get Part 1 for ₹30 →</button>
       </div>
     </div>
 
@@ -544,7 +543,7 @@
   <div class="si">
     <p class="eyebrow">⚙️ How It Works</p>
     <h2 class="stitle">Pay Once, Get Everything</h2>
-    <p class="ssub">Simple pricing. Pay ₹49 once, get all future parts free. Come back anytime.</p>
+    <p class="ssub">Simple pricing. Pay ₹30 once, get all future parts free. Come back anytime.</p>
     <div class="steps-grid">
       <div class="step-card">
         <div class="step-num">01</div>
@@ -555,7 +554,7 @@
       <div class="step-card">
         <div class="step-num">02</div>
         <span class="step-icon">💳</span>
-        <div class="step-title">Pay ₹49 Once</div>
+        <div class="step-title">Pay ₹30 Once</div>
         <div class="step-desc">One payment unlocks Part 1 instantly and permanently. No subscriptions ever.</div>
       </div>
       <div class="step-card">
@@ -600,7 +599,7 @@
             <div class="rv-author"><div class="av av1">AK</div><div><div class="rv-name">Anjali Kumar</div><div class="rv-role">1st Year CS Student</div></div></div>
             <div class="rv-stars">★★★★★</div>
           </div>
-          <div class="rv-text">"Best ₹49 I've spent. Part 1 is amazing — waiting for Part 2!"</div>
+          <div class="rv-text">"Best ₹30 I've spent. Part 1 is amazing — waiting for Part 2!"</div>
           <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">February 2025</span></div>
         </div>
         <div class="rv-card">
@@ -632,7 +631,7 @@
     <div class="contact-grid">
       <div>
         <p class="c-blurb">I'm Mahi — I write these notes and handle everything personally.</p>
-        <div class="ci"><div class="c-icon">📧</div><div><div class="c-label">Email</div><div class="c-val">bhumeshsharma09@gmail.com</div></div></div>
+        <div class="ci"><div class="c-icon">📧</div><div><div class="c-label">Email</div><div class="c-val"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="e98b819c848c9a819a81889b8488d9d0a98e84888085c78a8684">[email&#160;protected]</a></div></div></div>
         <div class="ci"><div class="c-icon">💬</div><div><div class="c-label">WhatsApp</div><div class="c-val">+91 XXXXX XXXXX</div></div></div>
         <div class="ci"><div class="c-icon">🕐</div><div><div class="c-label">Response Time</div><div class="c-val">Usually within a few hours</div></div></div>
       </div>
@@ -716,11 +715,11 @@
       <span>Pay once → <strong>Part 1 unlocks now</strong>. Future parts unlock automatically — <strong>zero extra payment, ever.</strong></span>
     </div>
     <div class="obox">
-      <div class="oline"><span>Part 1 — Python Basics for AI</span><span>₹49</span></div>
-      <div class="oline"><span>GST (18%)</span><span>₹8.82</span></div>
-      <div class="oline tot"><span>Total</span><span>₹57.82</span></div>
+      <div class="oline"><span>Part 1 — Python Basics for AI</span><span>₹30</span></div>
+      <div class="oline"><span>GST (18%)</span><span>₹0</span></div>
+      <div class="oline tot"><span>Total</span><span>₹30</span></div>
     </div>
-    <button class="btn-pay" onclick="doPayment()">🔒 Pay ₹57.82 with Razorpay</button>
+    <button class="btn-pay" onclick="doPayment()">🔒 Pay ₹30 with Razorpay</button>
     <div class="psec">SSL Encrypted · Notes never download to your device</div>
   </div>
 </div>
@@ -754,13 +753,13 @@
 <div class="legal-page" id="refundPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>Refund Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>All products are digital PDF notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a> with your order details.</p>
+  <p>All products are digital PDF notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email <a href="/cdn-cgi/l/email-protection#06646e736b63756e756e67746b67363f46616b676f6a2865696b"><span class="__cf_email__" data-cfemail="cdafa5b8a0a8bea5bea5acbfa0acfdf48daaa0aca4a1e3aea2a0">[email&#160;protected]</span></a> with your order details.</p>
 </div></div>
 
 <div class="legal-page" id="privacyPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>Privacy Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>We collect name, email, and payment info to provide our service. Payments are processed by Razorpay. We never store card details. Your data is never sold to third parties. Contact: <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
+  <p>We collect name, email, and payment info to provide our service. Payments are processed by Razorpay. We never store card details. Your data is never sold to third parties. Contact: <a href="/cdn-cgi/l/email-protection#9bf9f3eef6fee8f3e8f3fae9f6faaba2dbfcf6faf2f7b5f8f4f6"><span class="__cf_email__" data-cfemail="b7d5dfc2dad2c4dfc4dfd6c5dad6878ef7d0dad6dedb99d4d8da">[email&#160;protected]</span></a></p>
 </div></div>
 
 <div class="legal-page" id="termsPage"><div class="legal-inner">
@@ -772,10 +771,10 @@
 <div class="legal-page" id="aboutPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>About Mahi's Notes</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹49 once and get everything — no subscriptions, no hidden costs. Email: <a href="mailto:bhumeshsharma09@gmail.com">bhumeshsharma09@gmail.com</a></p>
+  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹30 once and get everything — no subscriptions, no hidden costs. Email: <a href="/cdn-cgi/l/email-protection#65070d100800160d160d04170804555c250208040c094b060a08"><span class="__cf_email__" data-cfemail="5c3e342931392f342f343d2e313d6c651c3b313d3530723f3331">[email&#160;protected]</span></a></p>
 </div></div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 let hasPaid = false;
 let selectedStars = 0;
 
@@ -853,13 +852,13 @@ function unlockPart1UI(){
 // LOCK UI
 function lockPart1UI(){
   window.hasPaid = false;
-  document.getElementById('badge1').textContent = '🔒 ₹49';
+  document.getElementById('badge1').textContent = '🔒 ₹30';
   document.getElementById('badge1').className = 'pbadge pb-locked';
   const part1Row = document.getElementById('part1Row');
   part1Row.classList.add('locked');
   part1Row.classList.remove('unlocked');
   part1Row.onclick = handleGetPart1;
-  document.getElementById('noteBtnPart1').textContent = 'Get Part 1 for ₹49 →';
+  document.getElementById('noteBtnPart1').textContent = 'Get Part 1 for ₹30 →';
   document.getElementById('noteBtnPart1').onclick = handleGetPart1;
 }
 
@@ -895,7 +894,7 @@ function doPayment(){
 
   var options = {
     key: "rzp_live_SH9YHcyg04pPiW", // Your live key
-    amount: 5782,
+    amount: 3000,
     currency: "INR",
     name: "Mahi's Notes",
     description: "Part 1 — Python Basics for AI",
@@ -972,27 +971,4 @@ function postReview(){
 // CONTACT
 function sendContact(e){
   e.preventDefault();
-  showToast('✅ Message sent! Mahi will reply soon.');
-  e.target.reset();
-}
-
-// TOAST
-function showToast(msg){
-  const t=document.getElementById('toast');
-  t.textContent=msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),3800);
-}
-
-// LEGAL
-function openLegal(page){
-  const pages={refund:'refundPage',privacy:'privacyPage',terms:'termsPage',about:'aboutPage'};
-  document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
-  document.getElementById(pages[page]).classList.add('open');
-  window.scrollTo(0,0);
-}
-function closeLegal(){
-  document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
-}
-</script>
-</body>
-</html>
+  showToast('�
