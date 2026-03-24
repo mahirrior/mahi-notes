@@ -22,14 +22,16 @@
     // 3. Click "Web" app icon </>
     // 4. Register app, copy the config below
     // ══════════════════════════════════════════════════════
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
-    };
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyBaMcB3vzxDoxxoVPiW5aeKm7N51k3TZ1E",
+  authDomain: "mahi-notes.firebaseapp.com",
+  projectId: "mahi-notes",
+  storageBucket: "mahi-notes.firebasestorage.app",
+  messagingSenderId: "941679481517",
+  appId: "1:941679481517:web:0703d962227a556535ac24",
+  measurementId: "G-ZP89JYGQNG"
+};
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
