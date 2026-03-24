@@ -985,8 +985,13 @@ function setStar(n){
   document.querySelectorAll('.sbtn').forEach((b,i)=>b.classList.toggle('lit', i<n));
 }
 
-function postReview(){
-  async function postReview(){
+// REVIEWS
+function setStar(n){
+  selectedStars = n;
+  document.querySelectorAll('.sbtn').forEach((b,i)=>b.classList.toggle('lit', i<n));
+}
+
+async function postReview(){
   const name = document.getElementById('rvName').value.trim();
   const role = document.getElementById('rvRole').value.trim();
   const text = document.getElementById('rvText').value.trim();
@@ -997,8 +1002,11 @@ function postReview(){
   }
 
   await window.postReviewToFirebase({
-    name, role: role || 'Student', text, 
-    stars: selectedStars, verified: window.hasPaid
+    name: name, 
+    role: role || 'Student', 
+    text: text, 
+    stars: selectedStars, 
+    verified: window.hasPaid
   });
 
   document.getElementById('rvName').value='';
@@ -1007,12 +1015,35 @@ function postReview(){
   setStar(0);
   showToast('✅ Review posted!');
 }
-}
 
 // CONTACT
 function sendContact(e){
   e.preventDefault();
-  showToast('�️ Sending your message...');
+  showToast('📧 Sending your message...');
   setTimeout(()=>{
     showToast('✅ Message sent! I will get back to you soon.');
-  }, 1000);}
+    e.target.reset();
+  }, 1000);
+}
+
+// TOAST
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; 
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),3800);
+}
+
+// LEGAL
+function openLegal(page){
+  const pages={refund:'refundPage',privacy:'privacyPage',terms:'termsPage',about:'aboutPage'};
+  document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
+  document.getElementById(pages[page]).classList.add('open');
+  window.scrollTo(0,0);
+}
+function closeLegal(){
+  document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
+}
+</script>
+</body>
+</html>
