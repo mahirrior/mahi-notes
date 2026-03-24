@@ -1012,4 +1012,7 @@ function postReview(){
 // CONTACT
 function sendContact(e){
   e.preventDefault();
-  showToast('�
+  showToast('�️ Sending your message...');
+  setTimeout(()=>{
+    showToast('✅ Message sent! I will get back to you soon.');
+  }, 1000);}
