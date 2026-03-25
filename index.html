@@ -12,217 +12,221 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
              signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged,
              updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, orderBy, onSnapshot, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, addDoc,
+             query, orderBy, onSnapshot, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-    // ══════════════════════════════════════════════════════
-    // 🔥 YOUR FIREBASE CONFIG — Replace with your own!
-    // Steps to get this:
-    // 1. Go to firebase.google.com
-    // 2. Create a new project called "mahi-notes"
-    // 3. Click "Web" app icon </>
-    // 4. Register app, copy the config below
-    // ══════════════════════════════════════════════════════
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyBaMcB3vzxDoxxoVPiW5aeKm7N51k3TZ1E",
-  authDomain: "mahi-notes.firebaseapp.com",
-  projectId: "mahi-notes",
-  storageBucket: "mahi-notes.firebasestorage.app",
-  messagingSenderId: "941679481517",
-  appId: "1:941679481517:web:0703d962227a556535ac24",
-  measurementId: "G-ZP89JYGQNG"
-};
+    const firebaseConfig = {
+      apiKey: "AIzaSyBaMcB3vzxDoxxoVPiW5aeKm7N51k3TZ1E",
+      authDomain: "mahi-notes.firebaseapp.com",
+      projectId: "mahi-notes",
+      storageBucket: "mahi-notes.firebasestorage.app",
+      messagingSenderId: "941679481517",
+      appId: "1:941679481517:web:0703d962227a556535ac24",
+      measurementId: "G-ZP89JYGQNG"
+    };
 
-    const app = initializeApp(firebaseConfig);
+    const app  = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    const db   = getFirestore(app);
     const googleProvider = new GoogleAuthProvider();
-    // Load reviews from Firebase
-window.firebaseDB = db;
-const reviewsQuery = query(collection(db, "reviews"), orderBy("timestamp", "desc"), limit(20));
-onSnapshot(reviewsQuery, (snapshot) => {
-  snapshot.forEach((docSnap) => {
-    const review = docSnap.data();
-    if (document.getElementById('review-' + docSnap.id)) return;
-    const card = createReviewCard(review, docSnap.id);
-    const feed = document.getElementById('reviewsFeed');
-    if (feed) feed.insertBefore(card, feed.firstChild);
-  });
-});
-function createReviewCard(review, reviewId) {
-  const stars = '★'.repeat(review.stars) + '☆'.repeat(5 - review.stars);
-  const initials = review.name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2);
-  const dateStr = new Date(review.timestamp).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
-  const card = document.createElement('div');
-  card.className = 'rv-card';
-  card.id = 'review-' + reviewId;
-  card.innerHTML = `
-    <div class="rv-top">
-      <div class="rv-author">
-        <div class="av av-new">${initials}</div>
-        <div><div class="rv-name">${review.name}</div><div class="rv-role">${review.role}</div></div>
-      </div>
-      <div class="rv-stars">${stars}</div>
-    </div>
-    <div class="rv-text">"${review.text}"</div>
-    <div class="rv-foot">
-      ${review.verified ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
-      <span class="rv-date">${dateStr}</span>
-    </div>`;
-  return card;
-}
-// Save review function
-window.postReviewToFirebase = async function(reviewData) {
-  await addDoc(collection(db, "reviews"), {
-    name: reviewData.name,
-    role: reviewData.role,
-    text: reviewData.text,
-    stars: reviewData.stars,
-    verified: reviewData.verified,
-    timestamp: new Date().toISOString(),
-    createdAt: new Date()
-  });
-};
 
-    // ══ WATCH LOGIN STATE ══
-    // This runs every time page loads — checks if user is already logged in
+    // ── expose db globally for review posting ──
+    window.firebaseDB = db;
+
+    // ── live reviews feed ──
+    const reviewsQuery = query(collection(db, "reviews"), orderBy("timestamp", "desc"), limit(20));
+    onSnapshot(reviewsQuery, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added") {
+          const review = change.doc.data();
+          if (document.getElementById('review-' + change.doc.id)) return;
+          const card = createReviewCard(review, change.doc.id);
+          const feed = document.getElementById('reviewsFeed');
+          if (feed) feed.insertBefore(card, feed.children[3] || null); // insert after seed reviews
+        }
+      });
+    });
+
+    function createReviewCard(review, reviewId) {
+      const stars   = '★'.repeat(review.stars) + '☆'.repeat(5 - review.stars);
+      const initials = review.name.split(' ').map(w => w[0] || '').join('').toUpperCase().slice(0, 2);
+      const dateStr  = new Date(review.timestamp).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+      const card = document.createElement('div');
+      card.className = 'rv-card';
+      card.id = 'review-' + reviewId;
+      card.innerHTML = `
+        <div class="rv-top">
+          <div class="rv-author">
+            <div class="av av-new">${initials}</div>
+            <div><div class="rv-name">${review.name}</div><div class="rv-role">${review.role || 'Student'}</div></div>
+          </div>
+          <div class="rv-stars">${stars}</div>
+        </div>
+        <div class="rv-text">"${review.text}"</div>
+        <div class="rv-foot">
+          ${review.verified ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
+          <span class="rv-date">${dateStr}</span>
+        </div>`;
+      return card;
+    }
+
+    window.postReviewToFirebase = async function(reviewData) {
+      await addDoc(collection(db, "reviews"), {
+        name:      reviewData.name,
+        role:      reviewData.role,
+        text:      reviewData.text,
+        stars:     reviewData.stars,
+        verified:  reviewData.verified,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date()
+      });
+    };
+
+    // ══════════════════════════════════════════
+    // AUTH STATE — runs on every page load
+    // ══════════════════════════════════════════
     onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // User is logged in
         window.currentUser = user;
         updateNavForLoggedIn(user);
 
-        // Check if this user has already paid
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists() && userDoc.data().hasPaid) {
-          window.hasPaid = true;
-          unlockPart1UI();
-          showToast('✅ Welcome back ' + (user.displayName || user.email) + '!');
+        // Check purchase status in Firestore
+        try {
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          if (userDoc.exists() && userDoc.data().hasPaid === true) {
+            window.hasPaid = true;
+            unlockPart1UI();
+            showToast('✅ Welcome back ' + (user.displayName || user.email).split(' ')[0] + '!');
+          }
+        } catch (err) {
+          console.error('Error reading user doc:', err);
         }
       } else {
-        // User is logged out
         window.currentUser = null;
-        window.hasPaid = false;
+        window.hasPaid     = false;
         updateNavForLoggedOut();
       }
     });
 
-    // ══ SIGNUP WITH EMAIL ══
+    // ── SIGNUP ──
     window.doSignup = async function() {
       const name  = document.getElementById('signupName').value.trim();
       const email = document.getElementById('signupEmail').value.trim();
       const pass  = document.getElementById('signupPass').value;
 
-      if (!name)  { showToast('⚠️ Please enter your name.'); return; }
-      if (!email) { showToast('⚠️ Please enter your email.'); return; }
-      if (pass.length < 6) { showToast('⚠️ Password must be at least 6 characters.'); return; }
+      if (!name)         { showToast('⚠️ Please enter your name.');              return; }
+      if (!email)        { showToast('⚠️ Please enter your email.');             return; }
+      if (pass.length < 6) { showToast('⚠️ Password must be at least 6 chars.'); return; }
 
       const btn = document.getElementById('signupBtn');
-      btn.textContent = 'Creating account...';
+      btn.textContent = 'Creating account…';
       btn.disabled = true;
 
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, pass);
         await updateProfile(cred.user, { displayName: name });
 
-        // Save user to database
+        // FIX: merge:true so we never accidentally overwrite hasPaid
         await setDoc(doc(db, "users", cred.user.uid), {
-          name: name,
-          email: email,
-          hasPaid: false,
-          createdAt: new Date().toISOString()
-        });
+          name, email, hasPaid: false, createdAt: new Date().toISOString()
+        }, { merge: true });
 
         closeM('signup');
         showToast('🎉 Account created! Welcome ' + name + '!');
-      } catch (err) {
-        if (err.code === 'auth/email-already-in-use') {
-          showToast('⚠️ This email is already registered. Please log in.');
-        } else {
-          showToast('⚠️ Error: ' + err.message);
+
+        // If user came from "pay now" flow, open payment right after signup
+        if (window._pendingPayment) {
+          window._pendingPayment = false;
+          setTimeout(() => openM('payment'), 400);
         }
+      } catch (err) {
+        showToast(err.code === 'auth/email-already-in-use'
+          ? '⚠️ Email already registered. Please log in.'
+          : '⚠️ Error: ' + err.message);
       } finally {
         btn.textContent = 'Create Account →';
         btn.disabled = false;
       }
     };
 
-    // ══ LOGIN WITH EMAIL ══
+    // ── LOGIN ──
     window.doLogin = async function() {
       const email = document.getElementById('loginEmail').value.trim();
       const pass  = document.getElementById('loginPass').value;
 
-      if (!email) { showToast('⚠️ Please enter your email.'); return; }
+      if (!email) { showToast('⚠️ Please enter your email.');    return; }
       if (!pass)  { showToast('⚠️ Please enter your password.'); return; }
 
       const btn = document.getElementById('loginBtn');
-      btn.textContent = 'Logging in...';
+      btn.textContent = 'Logging in…';
       btn.disabled = true;
 
       try {
         await signInWithEmailAndPassword(auth, email, pass);
         closeM('login');
-        // onAuthStateChanged handles the rest
+        // onAuthStateChanged handles unlock automatically
       } catch (err) {
-        if (err.code === 'auth/invalid-credential') {
-          showToast('⚠️ Wrong email or password.');
-        } else {
-          showToast('⚠️ Error: ' + err.message);
-        }
+        showToast(err.code === 'auth/invalid-credential'
+          ? '⚠️ Wrong email or password.'
+          : '⚠️ Error: ' + err.message);
       } finally {
         btn.textContent = 'Log In →';
         btn.disabled = false;
       }
     };
 
-    // ══ GOOGLE LOGIN ══
+    // ── GOOGLE LOGIN ──
     window.doGoogleLogin = async function() {
       try {
         const result = await signInWithPopup(auth, googleProvider);
-        const user = result.user;
+        const user   = result.user;
 
-        // Save to database if first time
         const userDoc = await getDoc(doc(db, "users", user.uid));
         if (!userDoc.exists()) {
           await setDoc(doc(db, "users", user.uid), {
-            name: user.displayName,
-            email: user.email,
-            hasPaid: false,
+            name:      user.displayName,
+            email:     user.email,
+            hasPaid:   false,
             createdAt: new Date().toISOString()
-          });
+          }, { merge: true });
         }
 
         closeM('login');
         closeM('signup');
+
+        if (window._pendingPayment) {
+          window._pendingPayment = false;
+          setTimeout(() => openM('payment'), 400);
+        }
       } catch (err) {
         showToast('⚠️ Google login failed. Try again.');
         console.error(err);
       }
     };
 
-    // ══ LOGOUT ══
+    // ── LOGOUT ──
     window.doLogout = async function() {
       await signOut(auth);
-      window.hasPaid = false;
+      window.hasPaid      = false;
+      window.currentUser  = null;
       lockPart1UI();
       showToast('👋 Logged out successfully.');
     };
 
-    // ══ SAVE PAYMENT TO DATABASE ══
-    // Called after Razorpay confirms payment
+    // ══════════════════════════════════════════
+    // SAVE PAYMENT  — FIX: returns true/false reliably
+    // ══════════════════════════════════════════
     window.savePaymentToDatabase = async function(paymentId) {
       if (!window.currentUser) {
-        showToast('⚠️ Please log in first to save your access.');
+        showToast('⚠️ Not logged in — please contact support with your payment ID.');
         return false;
       }
       try {
         await setDoc(doc(db, "users", window.currentUser.uid), {
-          hasPaid: true,
+          hasPaid:   true,
           paymentId: paymentId,
-          paidAt: new Date().toISOString()
-        }, { merge: true }); // merge:true keeps existing data
-
-        console.log('Payment saved to database ✓');
+          paidAt:    new Date().toISOString()
+        }, { merge: true }); // merge:true keeps name/email intact
         return true;
       } catch (err) {
         console.error('Failed to save payment:', err);
@@ -233,6 +237,7 @@ window.postReviewToFirebase = async function(reviewData) {
   </script>
 
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700;800&display=swap" rel="stylesheet"/>
+
   <style>
     :root {
       --bg:#0a150f; --bg2:#0f1e15; --card:#132820; --card2:#1a3028;
@@ -244,6 +249,8 @@ window.postReviewToFirebase = async function(reviewData) {
     *{margin:0;padding:0;box-sizing:border-box;}
     html{scroll-behavior:smooth;}
     body{font-family:'Cabinet Grotesk','DM Sans',sans-serif;background:var(--bg);color:var(--white);overflow-x:hidden;}
+
+    /* ── NAV ── */
     nav{position:fixed;top:0;left:0;right:0;z-index:200;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 6%;background:rgba(8,13,23,0.92);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);}
     .nav-logo{font-family:'Clash Display',sans-serif;font-weight:700;font-size:1.3rem;color:var(--white);text-decoration:none;display:flex;align-items:center;gap:0.5rem;}
     .logo-dot{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);animation:pdot 2s infinite;}
@@ -262,6 +269,7 @@ window.postReviewToFirebase = async function(reviewData) {
     .btn-logout{padding:.35rem .9rem;border:1px solid rgba(248,113,113,.3);background:transparent;color:#f87171;border-radius:7px;cursor:pointer;font-size:.78rem;font-family:'Cabinet Grotesk',sans-serif;transition:all .2s;}
     .btn-logout:hover{background:rgba(248,113,113,.1);}
 
+    /* ── HERO ── */
     #home{min-height:100vh;display:flex;align-items:center;padding:80px 6% 60px;position:relative;overflow:hidden;background:radial-gradient(ellipse 70% 60% at 70% 20%,rgba(0,229,160,0.07) 0%,transparent 65%),radial-gradient(ellipse 50% 50% at 10% 70%,rgba(59,130,246,0.05) 0%,transparent 60%),var(--bg);}
     .hero-grid{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:5rem;align-items:center;width:100%;}
     .hero-tag{display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border-green);border-radius:20px;padding:.3rem 1rem;font-size:.77rem;color:var(--green);font-weight:600;margin-bottom:1.4rem;background:var(--green-dim);}
@@ -300,11 +308,15 @@ window.postReviewToFirebase = async function(reviewData) {
     .price-note{font-size:.72rem;color:var(--gray);margin-top:1px;}
     .btn-ga{padding:.6rem 1.4rem;background:var(--green);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:'Clash Display',sans-serif;font-weight:700;font-size:.88rem;transition:all .2s;}
     .btn-ga:hover{background:var(--green2);transform:scale(1.03);}
+
+    /* ── SECTIONS ── */
     section{padding:90px 6%;position:relative;z-index:1;}
     .si{max-width:1100px;margin:0 auto;}
     .eyebrow{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:2.5px;color:var(--green);margin-bottom:.8rem;}
     .stitle{font-family:'Clash Display',sans-serif;font-size:clamp(1.7rem,2.8vw,2.4rem);font-weight:700;letter-spacing:-1px;margin-bottom:.9rem;line-height:1.2;}
     .ssub{color:var(--gray);font-size:.97rem;line-height:1.75;max-width:520px;}
+
+    /* ── NOTES CARD ── */
     #notes{background:rgba(255,255,255,.013);}
     .note-card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:all .3s;max-width:600px;margin-top:2.5rem;}
     .note-card:hover{border-color:rgba(0,229,160,.22);box-shadow:0 20px 50px rgba(0,0,0,.35);}
@@ -321,9 +333,13 @@ window.postReviewToFirebase = async function(reviewData) {
     .dy{background:var(--gold);}
     .dq{background:var(--gray2);}
     .pc span{color:var(--gray);}
-    .note-footer{padding:.9rem 1.4rem;border-top:1px solid var(--border);display:flex;gap:.7rem;}
+    .note-footer{padding:.9rem 1.4rem;border-top:1px solid var(--border);display:flex;gap:.7rem;flex-wrap:wrap;align-items:center;}
     .btn-pb{flex:1;padding:.55rem .8rem;background:var(--green);border:none;color:var(--bg);border-radius:8px;cursor:pointer;font-size:.83rem;font-family:'Clash Display',sans-serif;font-weight:600;transition:all .2s;}
     .btn-pb:hover{background:var(--green2);}
+    .restore-link{font-size:.75rem;color:var(--gray);cursor:pointer;text-decoration:underline;white-space:nowrap;}
+    .restore-link:hover{color:var(--green);}
+
+    /* ── PDF VIEWER ── */
     #pdfViewer{display:none;margin-top:2rem;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--card);}
     .viewer-header{padding:1rem 1.4rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:.8rem;}
     .viewer-title{font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:600;display:flex;align-items:center;gap:.6rem;}
@@ -338,8 +354,8 @@ window.postReviewToFirebase = async function(reviewData) {
     .lock-big{font-size:3.5rem;margin-bottom:.5rem;}
     .lock-title{font-family:'Clash Display',sans-serif;font-size:1.5rem;font-weight:700;}
     .lock-sub{color:var(--gray);font-size:.9rem;line-height:1.68;max-width:360px;}
-    .btn-unlock{padding:.75rem 2rem;background:var(--green);color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.95rem;font-weight:700;margin-top:.5rem;transition:all .2s;}
-    .btn-unlock:hover{background:var(--green2);transform:translateY(-1px);}
+
+    /* ── HOW IT WORKS ── */
     #how{background:var(--bg2);}
     .steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin-top:3rem;}
     .step-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.8rem;}
@@ -347,6 +363,8 @@ window.postReviewToFirebase = async function(reviewData) {
     .step-icon{font-size:1.6rem;margin-bottom:.8rem;display:block;}
     .step-title{font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:600;margin-bottom:.5rem;}
     .step-desc{font-size:.84rem;color:var(--gray);line-height:1.68;}
+
+    /* ── REVIEWS ── */
     #reviews{background:rgba(255,255,255,.013);}
     .reviews-layout{display:grid;grid-template-columns:1fr 1.6fr;gap:3rem;margin-top:3rem;align-items:start;}
     .write-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.6rem;}
@@ -385,6 +403,8 @@ window.postReviewToFirebase = async function(reviewData) {
     .rv-foot{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;}
     .rv-date{font-size:.72rem;color:var(--gray2);}
     .rv-verified{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600;background:var(--green-dim);border-radius:20px;padding:2px 8px;}
+
+    /* ── CONTACT ── */
     #contact{background:var(--bg2);}
     .contact-grid{display:grid;grid-template-columns:1fr 1.2fr;gap:5rem;margin-top:3rem;align-items:start;}
     .c-blurb{color:var(--gray);font-size:.94rem;line-height:1.78;margin-bottom:2rem;}
@@ -402,12 +422,16 @@ window.postReviewToFirebase = async function(reviewData) {
     textarea{resize:vertical;min-height:100px;}
     .btn-send{padding:.85rem 2rem;background:var(--green);color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.93rem;font-weight:700;transition:all .2s;align-self:flex-start;}
     .btn-send:hover{background:var(--green2);transform:translateY(-1px);}
+
+    /* ── FOOTER ── */
     footer{background:var(--bg);border-top:1px solid var(--border);padding:2.5rem 6%;text-align:center;}
     .flogo{font-family:'Clash Display',sans-serif;font-size:1.2rem;font-weight:700;margin-bottom:.6rem;display:flex;align-items:center;justify-content:center;gap:.5rem;}
     .flinks{display:flex;gap:2rem;justify-content:center;margin:1rem 0;flex-wrap:wrap;}
     .flinks a{color:var(--gray);text-decoration:none;font-size:.83rem;transition:color .2s;}
     .flinks a:hover{color:var(--white);}
     .fcopy{color:var(--gray2);font-size:.77rem;line-height:1.6;}
+
+    /* ── MODALS ── */
     .overlay{display:none;position:fixed;inset:0;z-index:999;background:rgba(5,10,20,.9);backdrop-filter:blur(10px);align-items:center;justify-content:center;}
     .overlay.open{display:flex;}
     .modal{background:var(--card);border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:2rem;width:90%;max-width:420px;box-shadow:0 40px 100px rgba(0,0,0,.6);position:relative;animation:slideUp .3s ease;max-height:90vh;overflow-y:auto;}
@@ -442,9 +466,12 @@ window.postReviewToFirebase = async function(reviewData) {
     .access-card{background:var(--green-dim);border:1px solid var(--border-green);border-radius:12px;padding:1rem;text-align:left;margin-bottom:1.2rem;}
     .ac-row{display:flex;align-items:center;gap:.8rem;padding:.5rem 0;}
     .ac-row+.ac-row{border-top:1px solid rgba(255,255,255,.06);}
+
+    /* ── TOAST ── */
     .toast{position:fixed;bottom:2rem;right:2rem;z-index:9999;background:var(--card2);border:1px solid var(--border-green);color:var(--white);padding:.9rem 1.4rem;border-radius:10px;font-size:.88rem;font-weight:500;box-shadow:0 10px 40px rgba(0,0,0,.4);transform:translateY(80px);opacity:0;transition:all .4s ease;pointer-events:none;max-width:320px;display:flex;gap:.6rem;align-items:center;}
     .toast.show{transform:translateY(0);opacity:1;}
-    /* LEGAL */
+
+    /* ── LEGAL PAGES ── */
     .legal-page{display:none;position:fixed;inset:0;z-index:998;background:var(--bg);overflow-y:auto;padding:80px 6% 60px;}
     .legal-page.open{display:block;}
     .legal-inner{max-width:800px;margin:0 auto;}
@@ -457,10 +484,18 @@ window.postReviewToFirebase = async function(reviewData) {
     .legal-page li{font-size:.94rem;line-height:1.8;color:var(--gray);margin-bottom:.5rem;}
     .legal-page strong{color:var(--white);}
     .legal-page a{color:var(--green);}
-    /* login required notice */
-    .login-required{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:10px;padding:.9rem 1rem;margin-bottom:1rem;font-size:.83rem;color:var(--gold);display:flex;gap:.6rem;align-items:flex-start;line-height:1.6;}
-    @media(max-width:900px){.hero-grid,.reviews-layout,.contact-grid{grid-template-columns:1fr;}.steps-grid{grid-template-columns:1fr;}.nav-links{display:none;}section{padding:70px 4%;}}
-    @media(max-width:600px){.frow{grid-template-columns:1fr;}nav{padding:0 4%;}}
+
+    /* ── RESPONSIVE ── */
+    @media(max-width:900px){
+      .hero-grid,.reviews-layout,.contact-grid{grid-template-columns:1fr;}
+      .steps-grid{grid-template-columns:1fr;}
+      .nav-links{display:none;}
+      section{padding:70px 4%;}
+    }
+    @media(max-width:600px){
+      .frow{grid-template-columns:1fr;}
+      nav{padding:0 4%;}
+    }
   </style>
 </head>
 <body>
@@ -474,12 +509,10 @@ window.postReviewToFirebase = async function(reviewData) {
     <li><a href="#reviews">Reviews</a></li>
     <li><a href="#contact">Contact</a></li>
   </ul>
-  <!-- Logged OUT buttons -->
   <div class="nav-actions" id="navLoggedOut">
-    <button class="btn-login" onclick="openM('login')">Log In</button>
+    <button class="btn-login"  onclick="openM('login')">Log In</button>
     <button class="btn-signup" onclick="openM('signup')">Sign Up</button>
   </div>
-  <!-- Logged IN user info -->
   <div class="nav-actions nav-user" id="navLoggedIn">
     <div class="nav-avatar" id="navAvatar">M</div>
     <span class="nav-uname" id="navUname">User</span>
@@ -487,6 +520,7 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </nav>
 
+<!-- ══ HERO ══ -->
 <section id="home">
   <div class="hero-grid">
     <div>
@@ -495,7 +529,7 @@ window.postReviewToFirebase = async function(reviewData) {
       <p class="hero-desc">Beginner-friendly notes that take you from zero to building your first AI models. Simple, clear, no fluff — written by Mahi.</p>
       <div class="hero-btns">
         <button class="btn-primary" onclick="handleGetPart1()">Get Part 1 — ₹30</button>
-        <button class="btn-ghost" onclick="scrollToId('notes')">See What's Inside</button>
+        <button class="btn-ghost"   onclick="scrollToId('notes')">See What's Inside</button>
       </div>
       <div class="hero-pills">
         <span class="pill">✅ Pay once for Part 1</span>
@@ -542,11 +576,13 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </section>
 
+<!-- ══ NOTES ══ -->
 <section id="notes">
   <div class="si">
     <p class="eyebrow">📚 Study Material</p>
     <h2 class="stitle">Python for AI — Beginners</h2>
     <p class="ssub">My first notes, written as clearly as I wish someone had explained it to me.</p>
+
     <div class="note-card">
       <div class="note-top">🐍<span class="ntbadge">Pay Once</span></div>
       <div class="note-body">
@@ -561,32 +597,38 @@ window.postReviewToFirebase = async function(reviewData) {
       </div>
       <div class="note-footer">
         <button class="btn-pb" id="noteBtnPart1" onclick="handleGetPart1()">Get Part 1 for ₹30 →</button>
+        <span class="restore-link" onclick="restoreAccess()" title="Already paid? Click to restore access">Already paid? Restore access</span>
       </div>
     </div>
 
+    <!-- PDF VIEWER — hidden until paid -->
     <div id="pdfViewer">
       <div class="viewer-header">
         <div class="viewer-title">📄 <span id="viewerLabel">Part 1 — Python Basics for AI</span></div>
         <div class="viewer-tabs">
-          <button class="vtab active" id="tab1" onclick="switchPart('part1')">Part 1</button>
+          <button class="vtab active"    id="tab1" onclick="switchPart('part1')">Part 1</button>
           <button class="vtab locked-tab" id="tab2">Part 2 (Soon)</button>
         </div>
       </div>
       <div class="pdf-frame-wrap">
-        <iframe id="pdfFrame" src="about:blank"
+        <iframe id="pdfFrame"
+          src="about:blank"
           data-part1="https://drive.google.com/file/d/1QIln0ld2ZnCinoVzUltzOoXXMC-Qy9lF/preview"
           data-part2="https://drive.google.com/file/d/YOUR_PART2_FILE_ID/preview"
-          allow="autoplay" title="Mahi's Notes PDF Viewer"></iframe>
+          allow="autoplay"
+          title="Mahi's Notes PDF Viewer">
+        </iframe>
         <div class="part2-overlay" id="p2overlay">
           <div class="lock-big">🔓</div>
           <div class="lock-title">Part 2 Coming Soon</div>
-          <div class="lock-sub">When Mahi uploads Part 2, it unlocks here automatically for you — no extra cost!</div>
+          <div class="lock-sub">When Mahi uploads Part 2, it unlocks here automatically — no extra cost!</div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
+<!-- ══ HOW IT WORKS ══ -->
 <section id="how">
   <div class="si">
     <p class="eyebrow">⚙️ How It Works</p>
@@ -615,6 +657,7 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </section>
 
+<!-- ══ REVIEWS ══ -->
 <section id="reviews">
   <div class="si">
     <p class="eyebrow">⭐ Reviews</p>
@@ -633,15 +676,16 @@ window.postReviewToFirebase = async function(reviewData) {
             <button class="sbtn" onclick="setStar(5)">★</button>
           </div>
           <div class="rform">
-            <input id="rvName" type="text" placeholder="Your name"/>
-            <input id="rvRole" type="text" placeholder="Your background (e.g. 1st Year CS...)"/>
-            <textarea id="rvText" placeholder="Write your review..."></textarea>
+            <input id="rvName" type="text"   placeholder="Your name"/>
+            <input id="rvRole" type="text"   placeholder="Your background (e.g. 1st Year CS...)"/>
+            <textarea id="rvText"            placeholder="Write your review..."></textarea>
             <div class="buyer-note">🔒 Buyers automatically get a Verified Buyer badge.</div>
             <button class="btn-post" onclick="postReview()">Post Review →</button>
           </div>
         </div>
       </div>
       <div class="reviews-feed" id="reviewsFeed">
+        <!-- Seed reviews -->
         <div class="rv-card">
           <div class="rv-top">
             <div class="rv-author"><div class="av av1">AK</div><div><div class="rv-name">Anjali Kumar</div><div class="rv-role">1st Year CS Student</div></div></div>
@@ -671,6 +715,7 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </section>
 
+<!-- ══ CONTACT ══ -->
 <section id="contact">
   <div class="si">
     <p class="eyebrow">✉️ Contact</p>
@@ -679,13 +724,13 @@ window.postReviewToFirebase = async function(reviewData) {
     <div class="contact-grid">
       <div>
         <p class="c-blurb">I'm Mahi — I write these notes and handle everything personally.</p>
-        <div class="ci"><div class="c-icon">📧</div><div><div class="c-label">Email</div><div class="c-val"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="e98b819c848c9a819a81889b8488d9d0a98e84888085c78a8684">[email&#160;protected]</a></div></div></div>
+        <div class="ci"><div class="c-icon">📧</div><div><div class="c-label">Email</div><div class="c-val">mahi@example.com</div></div></div>
         <div class="ci"><div class="c-icon">💬</div><div><div class="c-label">WhatsApp</div><div class="c-val">+91 XXXXX XXXXX</div></div></div>
         <div class="ci"><div class="c-icon">🕐</div><div><div class="c-label">Response Time</div><div class="c-val">Usually within a few hours</div></div></div>
       </div>
       <form class="cform" onsubmit="sendContact(event)">
         <div class="frow">
-          <div class="fg"><label>Name</label><input type="text" placeholder="Your name"/></div>
+          <div class="fg"><label>Name</label><input type="text"  placeholder="Your name"/></div>
           <div class="fg"><label>Email</label><input type="email" placeholder="you@email.com"/></div>
         </div>
         <div class="fg"><label>Subject</label><input type="text" placeholder="e.g. Payment issue..."/></div>
@@ -699,19 +744,22 @@ window.postReviewToFirebase = async function(reviewData) {
 <footer>
   <div class="flogo"><span class="logo-dot"></span>Mahi's Notes</div>
   <div class="flinks">
-    <a href="#home">Home</a><a href="#notes">Notes</a>
-    <a href="#how">How It Works</a><a href="#reviews">Reviews</a><a href="#contact">Contact</a>
-    <a href="#" onclick="openLegal('refund');return false;">Refund Policy</a>
-    <a href="#" onclick="openLegal('privacy');return false;">Privacy Policy</a>
-    <a href="#" onclick="openLegal('terms');return false;">Terms</a>
-    <a href="#" onclick="openLegal('about');return false;">About</a>
+    <a href="#home">Home</a>
+    <a href="#notes">Notes</a>
+    <a href="#how">How It Works</a>
+    <a href="#reviews">Reviews</a>
+    <a href="#contact">Contact</a>
+    <a href="#" onclick="openLegal('refund');  return false;">Refund Policy</a>
+    <a href="#" onclick="openLegal('privacy'); return false;">Privacy Policy</a>
+    <a href="#" onclick="openLegal('terms');   return false;">Terms</a>
+    <a href="#" onclick="openLegal('about');   return false;">About</a>
   </div>
   <p class="fcopy">© 2026 Mahi's Notes · PDFs readable in-browser only · Made with ❤️ by Mahi</p>
 </footer>
 
 <div class="toast" id="toast"></div>
 
-<!-- LOGIN MODAL -->
+<!-- ══ LOGIN MODAL ══ -->
 <div class="overlay" id="loginOverlay">
   <div class="modal">
     <button class="mx" onclick="closeM('login')">✕</button>
@@ -723,7 +771,7 @@ window.postReviewToFirebase = async function(reviewData) {
     </button>
     <div class="or-divider"><span>or</span></div>
     <div class="mf">
-      <div class="fg"><label>Email</label><input id="loginEmail" type="email" placeholder="you@email.com"/></div>
+      <div class="fg"><label>Email</label><input id="loginEmail" type="email"    placeholder="you@email.com"/></div>
       <div class="fg"><label>Password</label><input id="loginPass" type="password" placeholder="Your password"/></div>
       <button class="mbtn" id="loginBtn" onclick="doLogin()">Log In →</button>
     </div>
@@ -731,7 +779,7 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </div>
 
-<!-- SIGNUP MODAL -->
+<!-- ══ SIGNUP MODAL ══ -->
 <div class="overlay" id="signupOverlay">
   <div class="modal">
     <button class="mx" onclick="closeM('signup')">✕</button>
@@ -743,16 +791,16 @@ window.postReviewToFirebase = async function(reviewData) {
     </button>
     <div class="or-divider"><span>or</span></div>
     <div class="mf">
-      <div class="fg"><label>Full Name</label><input id="signupName" type="text" placeholder="Your name"/></div>
-      <div class="fg"><label>Email</label><input id="signupEmail" type="email" placeholder="you@email.com"/></div>
-      <div class="fg"><label>Password</label><input id="signupPass" type="password" placeholder="Min 6 characters"/></div>
+      <div class="fg"><label>Full Name</label><input id="signupName" type="text"     placeholder="Your name"/></div>
+      <div class="fg"><label>Email</label>    <input id="signupEmail" type="email"   placeholder="you@email.com"/></div>
+      <div class="fg"><label>Password</label> <input id="signupPass" type="password" placeholder="Min 6 characters"/></div>
       <button class="mbtn" id="signupBtn" onclick="doSignup()">Create Account →</button>
     </div>
     <div class="msw">Already have an account? <a onclick="switchM('signup','login')">Log in</a></div>
   </div>
 </div>
 
-<!-- PAYMENT MODAL -->
+<!-- ══ PAYMENT MODAL ══ -->
 <div class="overlay" id="paymentOverlay">
   <div class="modal wide">
     <button class="mx" onclick="closeM('payment')">✕</button>
@@ -772,7 +820,7 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </div>
 
-<!-- SUCCESS MODAL -->
+<!-- ══ SUCCESS MODAL ══ -->
 <div class="overlay" id="successOverlay">
   <div class="modal wide">
     <button class="mx" onclick="closeM('success')">✕</button>
@@ -797,17 +845,17 @@ window.postReviewToFirebase = async function(reviewData) {
   </div>
 </div>
 
-<!-- LEGAL PAGES -->
+<!-- ══ LEGAL PAGES ══ -->
 <div class="legal-page" id="refundPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>Refund Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>All products are digital PDF notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email <a href="/cdn-cgi/l/email-protection#06646e736b63756e756e67746b67363f46616b676f6a2865696b"><span class="__cf_email__" data-cfemail="cdafa5b8a0a8bea5bea5acbfa0acfdf48daaa0aca4a1e3aea2a0">[email&#160;protected]</span></a> with your order details.</p>
+  <p>All products are digital PDF notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email mahi@example.com with your order details.</p>
 </div></div>
 
 <div class="legal-page" id="privacyPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>Privacy Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>We collect name, email, and payment info to provide our service. Payments are processed by Razorpay. We never store card details. Your data is never sold to third parties. Contact: <a href="/cdn-cgi/l/email-protection#9bf9f3eef6fee8f3e8f3fae9f6faaba2dbfcf6faf2f7b5f8f4f6"><span class="__cf_email__" data-cfemail="b7d5dfc2dad2c4dfc4dfd6c5dad6878ef7d0dad6dedb99d4d8da">[email&#160;protected]</span></a></p>
+  <p>We collect name, email, and payment info to provide our service. Payments are processed by Razorpay. We never store card details. Your data is never sold to third parties.</p>
 </div></div>
 
 <div class="legal-page" id="termsPage"><div class="legal-inner">
@@ -819,231 +867,311 @@ window.postReviewToFirebase = async function(reviewData) {
 <div class="legal-page" id="aboutPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>About Mahi's Notes</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹30 once and get everything — no subscriptions, no hidden costs. Email: <a href="/cdn-cgi/l/email-protection#65070d100800160d160d04170804555c250208040c094b060a08"><span class="__cf_email__" data-cfemail="5c3e342931392f342f343d2e313d6c651c3b313d3530723f3331">[email&#160;protected]</span></a></p>
+  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹30 once and get everything — no subscriptions, no hidden costs.</p>
 </div></div>
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-let hasPaid = false;
-let selectedStars = 0;
+<!-- ══════════════════════════════════════════════
+     MAIN SCRIPT  (no type=module — runs normally)
+     All window.* functions set by the module above
+     are safe to call here because they're set on
+     the window object before any user interaction.
+══════════════════════════════════════════════ -->
+<script>
+  // ── globals ──
+  window.hasPaid     = false;
+  window.currentUser = null;
+  var selectedStars  = 0;
 
-// NAV SCROLL
-window.addEventListener('scroll', () => {
-  const ids = ['home','notes','how','reviews','contact'];
-  const links = document.querySelectorAll('.nav-links a');
-  ids.forEach((id, i) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    if (r.top <= 80 && r.bottom > 80) {
-      links.forEach(l => l.classList.remove('active'));
-      if (links[i]) links[i].classList.add('active');
-    }
-  });
-});
-function scrollToId(id){ document.getElementById(id).scrollIntoView({behavior:'smooth'}); }
-
-// MODALS
-const OVS = { login:'loginOverlay', signup:'signupOverlay', payment:'paymentOverlay', success:'successOverlay' };
-function openM(k){ document.getElementById(OVS[k]).classList.add('open'); document.body.style.overflow='hidden'; }
-function closeM(k){ document.getElementById(OVS[k]).classList.remove('open'); document.body.style.overflow=''; }
-function switchM(a,b){ closeM(a); setTimeout(()=>openM(b),200); }
-document.querySelectorAll('.overlay').forEach(el => {
-  el.addEventListener('click', e => { if(e.target===el){ el.classList.remove('open'); document.body.style.overflow=''; } });
-});
-
-// HANDLE GET PART 1 — checks if logged in first
-function handleGetPart1(){
-  if(window.hasPaid){
-    showPDF();
-    return;
-  }
-  if(!window.currentUser){
-    // Not logged in — show signup first
-    closeM('payment');
-    openM('signup');
-    showToast('👆 Please create an account first to save your purchase!');
-    return;
-  }
-  // Logged in but not paid — show payment
-  openM('payment');
-}
-
-// UPDATE NAV when logged in
-function updateNavForLoggedIn(user){
-  document.getElementById('navLoggedOut').style.display = 'none';
-  const navIn = document.getElementById('navLoggedIn');
-  navIn.style.display = 'flex';
-  const name = user.displayName || user.email;
-  document.getElementById('navUname').textContent = name.split(' ')[0];
-  document.getElementById('navAvatar').textContent = name[0].toUpperCase();
-}
-
-// UPDATE NAV when logged out
-function updateNavForLoggedOut(){
-  document.getElementById('navLoggedOut').style.display = 'flex';
-  document.getElementById('navLoggedIn').style.display = 'none';
-}
-
-// UNLOCK UI after payment confirmed
-function unlockPart1UI(){
-  window.hasPaid = true;
-  document.getElementById('badge1').textContent = '✓ Unlocked';
-  document.getElementById('badge1').className = 'pbadge pb-unlocked';
-  const part1Row = document.getElementById('part1Row');
-  part1Row.classList.remove('locked');
-  part1Row.classList.add('unlocked');
-  part1Row.onclick = showPDF;
-  document.getElementById('noteBtnPart1').textContent = '📖 Read Part 1 Now';
-  document.getElementById('noteBtnPart1').onclick = showPDF;
-}
-
-// LOCK UI
-function lockPart1UI(){
-  window.hasPaid = false;
-  document.getElementById('badge1').textContent = '🔒 ₹30';
-  document.getElementById('badge1').className = 'pbadge pb-locked';
-  const part1Row = document.getElementById('part1Row');
-  part1Row.classList.add('locked');
-  part1Row.classList.remove('unlocked');
-  part1Row.onclick = handleGetPart1;
-  document.getElementById('noteBtnPart1').textContent = 'Get Part 1 for ₹30 →';
-  document.getElementById('noteBtnPart1').onclick = handleGetPart1;
-}
-
-// PDF VIEWER
-function showPDF(){
-  const viewer = document.getElementById('pdfViewer');
-  viewer.style.display = 'block';
-  setTimeout(()=>{ viewer.scrollIntoView({behavior:'smooth'}); }, 100);
-  setTimeout(()=>switchPart('part1'), 500);
-}
-
-function switchPart(part){
-  const frame = document.getElementById('pdfFrame');
-  const overlay = document.getElementById('p2overlay');
-  const tab1 = document.getElementById('tab1');
-  const label = document.getElementById('viewerLabel');
-  if(part === 'part1'){
-    frame.src = frame.getAttribute('data-part1');
-    overlay.classList.remove('show');
-    tab1.classList.add('active');
-    label.textContent = 'Part 1 — Python Basics for AI';
-  }
-}
-
-// RAZORPAY PAYMENT
-function doPayment(){
-  if(!window.currentUser){
-    closeM('payment');
-    openM('signup');
-    showToast('👆 Please create an account first!');
-    return;
-  }
-
-  var options = {
-    key: "rzp_live_SH9YHcyg04pPiW", // Your live key
-    amount: 3000,
-    currency: "INR",
-    name: "Mahi's Notes",
-    description: "Part 1 — Python Basics for AI",
-    prefill: {
-      name: window.currentUser.displayName || '',
-      email: window.currentUser.email || ''
-    },
-    handler: async function(response){
-      showToast('⏳ Saving your purchase...');
-      // Save payment to Firebase database
-      const saved = await window.savePaymentToDatabase(response.razorpay_payment_id);
-      if(saved){
-        unlockPart1UI();
-        closeM('payment');
-        setTimeout(()=>openM('success'), 350);
-      } else {
-        showToast('⚠️ Payment done but saving failed. Contact support with payment ID: ' + response.razorpay_payment_id);
+  // ── NAV active link on scroll ──
+  window.addEventListener('scroll', function() {
+    var ids   = ['home','notes','how','reviews','contact'];
+    var links = document.querySelectorAll('.nav-links a');
+    ids.forEach(function(id, i) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      if (r.top <= 80 && r.bottom > 80) {
+        links.forEach(function(l){ l.classList.remove('active'); });
+        if (links[i]) links[i].classList.add('active');
       }
-    },
-    modal: {
-      ondismiss: function(){ showToast('Payment cancelled.'); }
-    },
-    theme: { color: "#00e5a0" }
-  };
-
-  var rzp = new Razorpay(options);
-  rzp.open();
-  closeM('payment');
-}
-
-function afterPayment(){
-  closeM('success');
-  showPDF();
-  showToast('🎉 Part 1 unlocked! Happy learning 🐍');
-}
-
-// REVIEWS
-function setStar(n){
-  selectedStars = n;
-  document.querySelectorAll('.sbtn').forEach((b,i)=>b.classList.toggle('lit', i<n));
-}
-
-// REVIEWS
-function setStar(n){
-  selectedStars = n;
-  document.querySelectorAll('.sbtn').forEach((b,i)=>b.classList.toggle('lit', i<n));
-}
-
-async function postReview(){
-  const name = document.getElementById('rvName').value.trim();
-  const role = document.getElementById('rvRole').value.trim();
-  const text = document.getElementById('rvText').value.trim();
-  
-  if(!name || !text || selectedStars === 0){ 
-    showToast('⚠️ Please fill all fields'); 
-    return; 
-  }
-
-  await window.postReviewToFirebase({
-    name: name, 
-    role: role || 'Student', 
-    text: text, 
-    stars: selectedStars, 
-    verified: window.hasPaid
+    });
   });
 
-  document.getElementById('rvName').value='';
-  document.getElementById('rvRole').value='';
-  document.getElementById('rvText').value='';
-  setStar(0);
-  showToast('✅ Review posted!');
-}
+  function scrollToId(id) {
+    document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+  }
 
-// CONTACT
-function sendContact(e){
-  e.preventDefault();
-  showToast('📧 Sending your message...');
-  setTimeout(()=>{
-    showToast('✅ Message sent! I will get back to you soon.');
-    e.target.reset();
-  }, 1000);
-}
+  // ── MODALS ──
+  var OVS = { login:'loginOverlay', signup:'signupOverlay', payment:'paymentOverlay', success:'successOverlay' };
 
-// TOAST
-function showToast(msg){
-  const t=document.getElementById('toast');
-  t.textContent=msg; 
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),3800);
-}
+  function openM(k)    { document.getElementById(OVS[k]).classList.add('open');    document.body.style.overflow = 'hidden'; }
+  function closeM(k)   { document.getElementById(OVS[k]).classList.remove('open'); document.body.style.overflow = ''; }
+  function switchM(a,b){ closeM(a); setTimeout(function(){ openM(b); }, 200); }
 
-// LEGAL
-function openLegal(page){
-  const pages={refund:'refundPage',privacy:'privacyPage',terms:'termsPage',about:'aboutPage'};
-  document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
-  document.getElementById(pages[page]).classList.add('open');
-  window.scrollTo(0,0);
-}
-function closeLegal(){
-  document.querySelectorAll('.legal-page').forEach(p=>p.classList.remove('open'));
-}
+  document.querySelectorAll('.overlay').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      if (e.target === el) { el.classList.remove('open'); document.body.style.overflow = ''; }
+    });
+  });
+
+  // ── HANDLE GET PART 1 ──
+  function handleGetPart1() {
+    if (window.hasPaid) {
+      // Already paid — just show the PDF
+      showPDF();
+      scrollToId('notes');
+      return;
+    }
+    if (!window.currentUser) {
+      // Not logged in — go to signup first, then auto-open payment after login
+      window._pendingPayment = true;
+      openM('signup');
+      showToast('👆 Create a free account first to save your purchase!');
+      return;
+    }
+    // Logged in but not paid — show payment
+    openM('payment');
+  }
+
+  // ── UPDATE NAV ──
+  function updateNavForLoggedIn(user) {
+    document.getElementById('navLoggedOut').style.display = 'none';
+    var navIn = document.getElementById('navLoggedIn');
+    navIn.style.display = 'flex';
+    var name = user.displayName || user.email || 'User';
+    document.getElementById('navUname').textContent  = name.split(' ')[0];
+    document.getElementById('navAvatar').textContent = name[0].toUpperCase();
+  }
+
+  function updateNavForLoggedOut() {
+    document.getElementById('navLoggedOut').style.display = 'flex';
+    document.getElementById('navLoggedIn').style.display  = 'none';
+  }
+
+  // ── UNLOCK UI ──
+  function unlockPart1UI() {
+    window.hasPaid = true;
+    document.getElementById('badge1').textContent = '✓ Unlocked';
+    document.getElementById('badge1').className   = 'pbadge pb-unlocked';
+    var row = document.getElementById('part1Row');
+    row.classList.remove('locked');
+    row.classList.add('unlocked');
+    row.onclick = function(){ showPDF(); scrollToId('notes'); };
+    document.getElementById('noteBtnPart1').textContent = '📖 Read Part 1 Now';
+    document.getElementById('noteBtnPart1').onclick = function(){ showPDF(); scrollToId('notes'); };
+  }
+
+  // ── LOCK UI ──
+  function lockPart1UI() {
+    window.hasPaid = false;
+    document.getElementById('badge1').textContent = '🔒 ₹30';
+    document.getElementById('badge1').className   = 'pbadge pb-locked';
+    var row = document.getElementById('part1Row');
+    row.classList.add('locked');
+    row.classList.remove('unlocked');
+    row.onclick = handleGetPart1;
+    document.getElementById('noteBtnPart1').textContent = 'Get Part 1 for ₹30 →';
+    document.getElementById('noteBtnPart1').onclick = handleGetPart1;
+    // Hide viewer
+    document.getElementById('pdfViewer').style.display = 'none';
+    document.getElementById('pdfFrame').src = 'about:blank';
+  }
+
+  // ══════════════════════════════════════════
+  // FIX: showPDF — no setTimeout, load directly
+  // ══════════════════════════════════════════
+  function showPDF() {
+    var viewer = document.getElementById('pdfViewer');
+    viewer.style.display = 'block';
+    switchPart('part1');                                          // load iframe immediately
+    setTimeout(function(){ viewer.scrollIntoView({ behavior: 'smooth' }); }, 150);
+  }
+
+  // ══════════════════════════════════════════
+  // FIX: switchPart — set src directly, no delay
+  // ══════════════════════════════════════════
+  function switchPart(part) {
+    var frame   = document.getElementById('pdfFrame');
+    var overlay = document.getElementById('p2overlay');
+    var tab1    = document.getElementById('tab1');
+    var label   = document.getElementById('viewerLabel');
+
+    if (part === 'part1') {
+      var url = frame.getAttribute('data-part1');
+      if (frame.src !== url) {           // only reload if different (avoids flicker)
+        frame.src = url;
+      }
+      overlay.classList.remove('show');
+      tab1.classList.add('active');
+      label.textContent = 'Part 1 — Python Basics for AI';
+    }
+  }
+
+  // ══════════════════════════════════════════
+  // RESTORE ACCESS — for returning paid users
+  // who aren't seeing the PDF
+  // ══════════════════════════════════════════
+  function restoreAccess() {
+    if (!window.currentUser) {
+      openM('login');
+      showToast('👆 Log in to restore your access.');
+      return;
+    }
+    if (window.hasPaid) {
+      showPDF();
+      scrollToId('notes');
+      showToast('📖 Here are your notes!');
+      return;
+    }
+    // Re-check Firestore manually
+    showToast('⏳ Checking your purchase status…');
+    // The onAuthStateChanged already ran — if hasPaid is still false,
+    // they haven't paid yet. But re-trigger for safety:
+    if (window.firebaseDB && window.currentUser) {
+      import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js").then(function(fb) {
+        fb.getDoc(fb.doc(window.firebaseDB, "users", window.currentUser.uid)).then(function(snap) {
+          if (snap.exists() && snap.data().hasPaid === true) {
+            window.hasPaid = true;
+            unlockPart1UI();
+            showPDF();
+            scrollToId('notes');
+            showToast('✅ Access restored! Happy learning 🐍');
+          } else {
+            showToast('No purchase found on your account. Contact support if you think this is wrong.');
+          }
+        });
+      });
+    }
+  }
+
+  // ══════════════════════════════════════════
+  // RAZORPAY PAYMENT
+  // FIX: explicitly set window.hasPaid = true
+  //      and call unlockPart1UI() right here
+  //      before waiting for Firestore callback
+  // ══════════════════════════════════════════
+  function doPayment() {
+    if (!window.currentUser) {
+      closeM('payment');
+      window._pendingPayment = true;
+      openM('signup');
+      showToast('👆 Please create an account first!');
+      return;
+    }
+
+    var options = {
+      key:         "rzp_live_SH9YHcyg04pPiW",
+      amount:      3000,
+      currency:    "INR",
+      name:        "Mahi's Notes",
+      description: "Part 1 — Python Basics for AI",
+      prefill: {
+        name:  window.currentUser.displayName || '',
+        email: window.currentUser.email       || ''
+      },
+      handler: async function(response) {
+        // ── FIX: unlock UI immediately, don't wait ──
+        window.hasPaid = true;
+        unlockPart1UI();
+        showToast('⏳ Saving your purchase…');
+
+        // Save to Firestore in background
+        var saved = await window.savePaymentToDatabase(response.razorpay_payment_id);
+        if (saved) {
+          closeM('payment');
+          setTimeout(function(){ openM('success'); }, 350);
+        } else {
+          // UI is already unlocked — just warn about the save failure
+          showToast('⚠️ Purchase active this session but saving failed. Email support with payment ID: ' + response.razorpay_payment_id);
+          closeM('payment');
+        }
+      },
+      modal: {
+        ondismiss: function() { showToast('Payment cancelled.'); }
+      },
+      theme: { color: "#00e5a0" }
+    };
+
+    var rzp = new Razorpay(options);
+    rzp.open();
+    closeM('payment');
+  }
+
+  function afterPayment() {
+    closeM('success');
+    showPDF();
+    scrollToId('notes');
+    showToast('🎉 Part 1 unlocked! Happy learning 🐍');
+  }
+
+  // ── REVIEWS ──
+  function setStar(n) {
+    selectedStars = n;
+    document.querySelectorAll('.sbtn').forEach(function(b, i){ b.classList.toggle('lit', i < n); });
+  }
+
+  async function postReview() {
+    var name = document.getElementById('rvName').value.trim();
+    var role = document.getElementById('rvRole').value.trim();
+    var text = document.getElementById('rvText').value.trim();
+
+    if (!name || !text || selectedStars === 0) {
+      showToast('⚠️ Please fill all fields and select a star rating.');
+      return;
+    }
+    if (!window.postReviewToFirebase) {
+      showToast('⚠️ Review system still loading. Try again in a moment.');
+      return;
+    }
+
+    try {
+      await window.postReviewToFirebase({
+        name:     name,
+        role:     role || 'Student',
+        text:     text,
+        stars:    selectedStars,
+        verified: window.hasPaid
+      });
+      document.getElementById('rvName').value = '';
+      document.getElementById('rvRole').value = '';
+      document.getElementById('rvText').value = '';
+      setStar(0);
+      showToast('✅ Review posted! Thank you 🙏');
+    } catch(e) {
+      showToast('⚠️ Could not post review. Please try again.');
+    }
+  }
+
+  // ── CONTACT ──
+  function sendContact(e) {
+    e.preventDefault();
+    showToast('📧 Sending your message…');
+    setTimeout(function(){
+      showToast('✅ Message sent! I will get back to you soon.');
+      e.target.reset();
+    }, 1000);
+  }
+
+  // ── TOAST ──
+  var toastTimer = null;
+  function showToast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3800);
+  }
+
+  // ── LEGAL ──
+  var legalMap = { refund:'refundPage', privacy:'privacyPage', terms:'termsPage', about:'aboutPage' };
+  function openLegal(page) {
+    document.querySelectorAll('.legal-page').forEach(function(p){ p.classList.remove('open'); });
+    document.getElementById(legalMap[page]).classList.add('open');
+    window.scrollTo(0, 0);
+  }
+  function closeLegal() {
+    document.querySelectorAll('.legal-page').forEach(function(p){ p.classList.remove('open'); });
+  }
 </script>
 </body>
 </html>
