@@ -30,7 +30,6 @@
     const db   = getFirestore(app);
     const googleProvider = new GoogleAuthProvider();
 
-    // ── expose db globally for review posting ──
     window.firebaseDB = db;
 
     // ── live reviews feed ──
@@ -42,7 +41,7 @@
           if (document.getElementById('review-' + change.doc.id)) return;
           const card = createReviewCard(review, change.doc.id);
           const feed = document.getElementById('reviewsFeed');
-          if (feed) feed.insertBefore(card, feed.children[3] || null); // insert after seed reviews
+          if (feed) feed.insertBefore(card, feed.children[3] || null);
         }
       });
     });
@@ -82,20 +81,15 @@
       });
     };
 
-    // ══════════════════════════════════════════
-    // AUTH STATE — runs on every page load
-    // ══════════════════════════════════════════
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         window.currentUser = user;
         updateNavForLoggedIn(user);
-
-        // Check purchase status in Firestore
         try {
           const userDoc = await getDoc(doc(db, "users", user.uid));
           if (userDoc.exists() && userDoc.data().hasPaid === true) {
             window.hasPaid = true;
-            unlockPart1UI();
+            unlockAllUI();
             showToast('✅ Welcome back ' + (user.displayName || user.email).split(' ')[0] + '!');
           }
         } catch (err) {
@@ -108,33 +102,24 @@
       }
     });
 
-    // ── SIGNUP ──
     window.doSignup = async function() {
       const name  = document.getElementById('signupName').value.trim();
       const email = document.getElementById('signupEmail').value.trim();
       const pass  = document.getElementById('signupPass').value;
-
-      if (!name)         { showToast('⚠️ Please enter your name.');              return; }
-      if (!email)        { showToast('⚠️ Please enter your email.');             return; }
+      if (!name)           { showToast('⚠️ Please enter your name.');              return; }
+      if (!email)          { showToast('⚠️ Please enter your email.');             return; }
       if (pass.length < 6) { showToast('⚠️ Password must be at least 6 chars.'); return; }
-
       const btn = document.getElementById('signupBtn');
       btn.textContent = 'Creating account…';
       btn.disabled = true;
-
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, pass);
         await updateProfile(cred.user, { displayName: name });
-
-        // FIX: merge:true so we never accidentally overwrite hasPaid
         await setDoc(doc(db, "users", cred.user.uid), {
           name, email, hasPaid: false, createdAt: new Date().toISOString()
         }, { merge: true });
-
         closeM('signup');
         showToast('🎉 Account created! Welcome ' + name + '!');
-
-        // If user came from "pay now" flow, open payment right after signup
         if (window._pendingPayment) {
           window._pendingPayment = false;
           setTimeout(() => openM('payment'), 400);
@@ -149,22 +134,17 @@
       }
     };
 
-    // ── LOGIN ──
     window.doLogin = async function() {
       const email = document.getElementById('loginEmail').value.trim();
       const pass  = document.getElementById('loginPass').value;
-
       if (!email) { showToast('⚠️ Please enter your email.');    return; }
       if (!pass)  { showToast('⚠️ Please enter your password.'); return; }
-
       const btn = document.getElementById('loginBtn');
       btn.textContent = 'Logging in…';
       btn.disabled = true;
-
       try {
         await signInWithEmailAndPassword(auth, email, pass);
         closeM('login');
-        // onAuthStateChanged handles unlock automatically
       } catch (err) {
         showToast(err.code === 'auth/invalid-credential'
           ? '⚠️ Wrong email or password.'
@@ -175,12 +155,10 @@
       }
     };
 
-    // ── GOOGLE LOGIN ──
     window.doGoogleLogin = async function() {
       try {
         const result = await signInWithPopup(auth, googleProvider);
         const user   = result.user;
-
         const userDoc = await getDoc(doc(db, "users", user.uid));
         if (!userDoc.exists()) {
           await setDoc(doc(db, "users", user.uid), {
@@ -190,10 +168,8 @@
             createdAt: new Date().toISOString()
           }, { merge: true });
         }
-
         closeM('login');
         closeM('signup');
-
         if (window._pendingPayment) {
           window._pendingPayment = false;
           setTimeout(() => openM('payment'), 400);
@@ -204,18 +180,14 @@
       }
     };
 
-    // ── LOGOUT ──
     window.doLogout = async function() {
       await signOut(auth);
       window.hasPaid      = false;
       window.currentUser  = null;
-      lockPart1UI();
+      lockAllUI();
       showToast('👋 Logged out successfully.');
     };
 
-    // ══════════════════════════════════════════
-    // SAVE PAYMENT  — FIX: returns true/false reliably
-    // ══════════════════════════════════════════
     window.savePaymentToDatabase = async function(paymentId) {
       if (!window.currentUser) {
         showToast('⚠️ Not logged in — please contact support with your payment ID.');
@@ -226,14 +198,13 @@
           hasPaid:   true,
           paymentId: paymentId,
           paidAt:    new Date().toISOString()
-        }, { merge: true }); // merge:true keeps name/email intact
+        }, { merge: true });
         return true;
       } catch (err) {
         console.error('Failed to save payment:', err);
         return false;
       }
     };
-
   </script>
 
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Cabinet+Grotesk:wght@300;400;500;700;800&display=swap" rel="stylesheet"/>
@@ -293,6 +264,7 @@
     .prow-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;}
     .pi-green{background:rgba(0,229,160,.15);}
     .pi-gold{background:rgba(251,191,36,.12);}
+    .pi-blue{background:rgba(59,130,246,.12);}
     .pi-gray{background:rgba(100,116,139,.1);}
     .prow-info{flex:1;}
     .prow-title{font-size:.88rem;font-weight:600;margin-bottom:2px;}
@@ -302,7 +274,6 @@
     .pb-locked{background:rgba(251,191,36,.12);color:var(--gold);}
     .pb-unlocked{background:rgba(0,229,160,.15);color:var(--green);}
     .pb-soon{background:rgba(100,116,139,.12);color:var(--gray);}
-    .coming-row{border:1px dashed var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:.7rem;display:flex;align-items:center;gap:.9rem;opacity:.5;}
     .price-row{margin-top:1.2rem;padding:1rem 1.1rem;background:linear-gradient(135deg,rgba(0,229,160,.08),rgba(59,130,246,.05));border:1px solid var(--border-green);border-radius:12px;display:flex;align-items:center;justify-content:space-between;}
     .price-main{font-family:'Clash Display',sans-serif;font-size:1.9rem;font-weight:700;}
     .price-note{font-size:.72rem;color:var(--gray);margin-top:1px;}
@@ -330,6 +301,7 @@
     .pc{display:flex;align-items:center;gap:.6rem;font-size:.82rem;}
     .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
     .dg{background:var(--green);box-shadow:0 0 6px var(--green);}
+    .db{background:var(--blue);box-shadow:0 0 6px var(--blue);}
     .dy{background:var(--gold);}
     .dq{background:var(--gray2);}
     .pc span{color:var(--gray);}
@@ -346,14 +318,9 @@
     .viewer-tabs{display:flex;gap:.5rem;}
     .vtab{padding:.4rem 1rem;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--gray);cursor:pointer;font-size:.82rem;font-family:'Cabinet Grotesk',sans-serif;transition:all .2s;}
     .vtab.active{background:var(--green);color:var(--bg);border-color:var(--green);font-weight:600;}
-    .vtab.locked-tab{opacity:.45;cursor:not-allowed;}
+    .vtab:not(.active):hover{border-color:rgba(0,229,160,.3);color:var(--white);}
     .pdf-frame-wrap{position:relative;}
     .pdf-frame-wrap iframe{width:100%;height:560px;border:none;display:block;background:#fff;}
-    .part2-overlay{display:none;position:absolute;inset:0;background:rgba(8,13,23,.93);backdrop-filter:blur(4px);flex-direction:column;align-items:center;justify-content:center;gap:1rem;text-align:center;padding:2rem;}
-    .part2-overlay.show{display:flex;}
-    .lock-big{font-size:3.5rem;margin-bottom:.5rem;}
-    .lock-title{font-family:'Clash Display',sans-serif;font-size:1.5rem;font-weight:700;}
-    .lock-sub{color:var(--gray);font-size:.9rem;line-height:1.68;max-width:360px;}
 
     /* ── HOW IT WORKS ── */
     #how{background:var(--bg2);}
@@ -526,21 +493,23 @@
     <div>
       <span class="hero-tag">🐍 Python for AI · Beginner Friendly</span>
       <h1>Learn <span class="accent">Python for AI</span><br/>with Mahi's Notes</h1>
-      <p class="hero-desc">Beginner-friendly notes that take you from zero to building your first AI models. Simple, clear, no fluff — written by Mahi.</p>
+      <p class="hero-desc">Beginner-friendly notes covering Python basics to AI concepts. Both Part 1 & Part 2 included — simple, clear, no fluff. Written by Mahi.</p>
       <div class="hero-btns">
-        <button class="btn-primary" onclick="handleGetPart1()">Get Part 1 — ₹30</button>
+        <button class="btn-primary" onclick="handleGetAccess()">Get Both Parts — ₹30</button>
         <button class="btn-ghost"   onclick="scrollToId('notes')">See What's Inside</button>
       </div>
       <div class="hero-pills">
-        <span class="pill">✅ Pay once for Part 1</span>
-        <span class="pill">🚀 Part 2 unlocks FREE later</span>
+        <span class="pill">✅ One payment — both parts</span>
+        <span class="pill">📄 Part 1 + Part 2 included</span>
         <span class="pill">🔒 Browser-only access</span>
       </div>
     </div>
     <div>
       <div class="hero-card">
         <div class="card-chip">📦 What You Get</div>
-        <div class="prow locked" id="part1Row" onclick="handleGetPart1()">
+
+        <!-- Part 1 row -->
+        <div class="prow locked" id="part1Row" onclick="handleGetAccess()">
           <div class="prow-icon pi-gold">📄</div>
           <div class="prow-info">
             <div class="prow-title">Part 1 — Python Basics for AI</div>
@@ -548,28 +517,23 @@
           </div>
           <span class="pbadge pb-locked" id="badge1">🔒 ₹30</span>
         </div>
-        <div class="coming-row">
-          <div class="prow-icon pi-gray">🤖</div>
+
+        <!-- Part 2 row -->
+        <div class="prow locked" id="part2Row" onclick="handleGetAccess()">
+          <div class="prow-icon pi-blue">🤖</div>
           <div class="prow-info">
-            <div class="prow-title" style="color:var(--gray)">Part 2 — AI Concepts (Coming Soon)</div>
-            <div class="prow-sub">Unlocks FREE for Part 1 buyers</div>
+            <div class="prow-title">Part 2 — AI Concepts</div>
+            <div class="prow-sub">ML basics, models, real AI applications</div>
           </div>
-          <span class="pbadge pb-soon">Free ✓</span>
+          <span class="pbadge pb-locked" id="badge2">🔒 Included</span>
         </div>
-        <div class="coming-row">
-          <div class="prow-icon pi-gray">🚀</div>
-          <div class="prow-info">
-            <div class="prow-title" style="color:var(--gray)">Part 3 — Future Updates</div>
-            <div class="prow-sub">Also FREE for Part 1 buyers</div>
-          </div>
-          <span class="pbadge pb-soon">Free ✓</span>
-        </div>
+
         <div class="price-row">
           <div>
             <div class="price-main">₹30</div>
-            <div class="price-note">One payment · All future parts FREE</div>
+            <div class="price-note">One payment · Both parts · Forever access</div>
           </div>
-          <button class="btn-ga" onclick="handleGetPart1()">Get Access →</button>
+          <button class="btn-ga" onclick="handleGetAccess()">Get Access →</button>
         </div>
       </div>
     </div>
@@ -581,22 +545,21 @@
   <div class="si">
     <p class="eyebrow">📚 Study Material</p>
     <h2 class="stitle">Python for AI — Beginners</h2>
-    <p class="ssub">My first notes, written as clearly as I wish someone had explained it to me.</p>
+    <p class="ssub">Two parts, one payment. Written as clearly as I wish someone had explained it to me.</p>
 
     <div class="note-card">
-      <div class="note-top">🐍<span class="ntbadge">Pay Once</span></div>
+      <div class="note-top">🐍<span class="ntbadge">Both Parts · ₹30</span></div>
       <div class="note-body">
         <div class="note-cat">Python for AI · Beginner</div>
         <div class="note-title">Python for AI Beginners — Complete Course</div>
-        <div class="note-desc">No prior coding experience needed. Part 1 available now. Part 2 unlocks FREE when uploaded.</div>
+        <div class="note-desc">No prior coding experience needed. Pay once and get instant access to both Part 1 and Part 2 right here in your browser.</div>
         <div class="parts-list">
-          <div class="pc"><span class="dot dy"></span><span>Part 1 — Python Basics (₹30 · unlocks now)</span></div>
-          <div class="pc"><span class="dot dq"></span><span>Part 2 — AI Concepts (Coming soon · FREE for buyers)</span></div>
-          <div class="pc"><span class="dot dq"></span><span>Part 3+ — Future updates (FREE for buyers)</span></div>
+          <div class="pc"><span class="dot dy"></span><span>Part 1 — Python Basics (variables, loops, file handling)</span></div>
+          <div class="pc"><span class="dot db"></span><span>Part 2 — Deep Python (OOPs basics, Functions, also more)</span></div>
         </div>
       </div>
       <div class="note-footer">
-        <button class="btn-pb" id="noteBtnPart1" onclick="handleGetPart1()">Get Part 1 for ₹30 →</button>
+        <button class="btn-pb" id="noteBtnMain" onclick="handleGetAccess()">Get Both Parts for ₹30 →</button>
         <span class="restore-link" onclick="restoreAccess()" title="Already paid? Click to restore access">Already paid? Restore access</span>
       </div>
     </div>
@@ -606,25 +569,21 @@
       <div class="viewer-header">
         <div class="viewer-title">📄 <span id="viewerLabel">Part 1 — Python Basics for AI</span></div>
         <div class="viewer-tabs">
-          <button class="vtab active"    id="tab1" onclick="switchPart('part1')">Part 1</button>
-          <button class="vtab locked-tab" id="tab2">Part 2 (Soon)</button>
+          <button class="vtab active" id="tab1" onclick="switchPart('part1')">Part 1</button>
+          <button class="vtab"        id="tab2" onclick="switchPart('part2')">Part 2</button>
         </div>
       </div>
       <div class="pdf-frame-wrap">
         <iframe id="pdfFrame"
           src="about:blank"
           data-part1="https://drive.google.com/file/d/1QIln0ld2ZnCinoVzUltzOoXXMC-Qy9lF/preview"
-          data-part2="https://drive.google.com/file/d/YOUR_PART2_FILE_ID/preview"
+          data-part2="https://docs.google.com/document/d/1lzXwIMiaG6lu7lU9QROhKDerdr5cbx9E/preview"
           allow="autoplay"
           title="Mahi's Notes PDF Viewer">
         </iframe>
-        <div class="part2-overlay" id="p2overlay">
-          <div class="lock-big">🔓</div>
-          <div class="lock-title">Part 2 Coming Soon</div>
-          <div class="lock-sub">When Mahi uploads Part 2, it unlocks here automatically — no extra cost!</div>
-        </div>
       </div>
     </div>
+
   </div>
 </section>
 
@@ -632,26 +591,26 @@
 <section id="how">
   <div class="si">
     <p class="eyebrow">⚙️ How It Works</p>
-    <h2 class="stitle">Pay Once, Get Everything</h2>
-    <p class="ssub">Simple pricing. Pay ₹30 once, get all future parts free. Come back anytime.</p>
+    <h2 class="stitle">Pay Once, Get Both Parts</h2>
+    <p class="ssub">Simple pricing. ₹30 once — Part 1 and Part 2 both unlock instantly.</p>
     <div class="steps-grid">
       <div class="step-card">
         <div class="step-num">01</div>
         <span class="step-icon">👤</span>
         <div class="step-title">Create Free Account</div>
-        <div class="step-desc">Sign up with email or Google. Your account remembers your purchase forever.</div>
+        <div class="step-desc">Sign up with email or Google. Your account saves your purchase forever.</div>
       </div>
       <div class="step-card">
         <div class="step-num">02</div>
         <span class="step-icon">💳</span>
         <div class="step-title">Pay ₹30 Once</div>
-        <div class="step-desc">One payment unlocks Part 1 instantly and permanently. No subscriptions ever.</div>
+        <div class="step-desc">One payment instantly unlocks both Part 1 and Part 2. No subscriptions, ever.</div>
       </div>
       <div class="step-card">
         <div class="step-num">03</div>
         <span class="step-icon">🚀</span>
-        <div class="step-title">Access Forever</div>
-        <div class="step-desc">Log in anytime from any device and your notes are there. Future parts unlock automatically.</div>
+        <div class="step-title">Read Both Parts</div>
+        <div class="step-desc">Switch between Part 1 and Part 2 anytime, from any device, forever.</div>
       </div>
     </div>
   </div>
@@ -685,13 +644,12 @@
         </div>
       </div>
       <div class="reviews-feed" id="reviewsFeed">
-        <!-- Seed reviews -->
         <div class="rv-card">
           <div class="rv-top">
             <div class="rv-author"><div class="av av1">AK</div><div><div class="rv-name">Anjali Kumar</div><div class="rv-role">1st Year CS Student</div></div></div>
             <div class="rv-stars">★★★★★</div>
           </div>
-          <div class="rv-text">"Best ₹30 I've spent. Part 1 is amazing — waiting for Part 2!"</div>
+          <div class="rv-text">"Best ₹30 I've spent. Both parts are amazing!"</div>
           <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">February 2025</span></div>
         </div>
         <div class="rv-card">
@@ -699,7 +657,7 @@
             <div class="rv-author"><div class="av av2">RS</div><div><div class="rv-name">Rohan Shah</div><div class="rv-role">Engineering Fresher</div></div></div>
             <div class="rv-stars">★★★★★</div>
           </div>
-          <div class="rv-text">"Zero coding background. These notes made Python actually make sense!"</div>
+          <div class="rv-text">"Zero coding background. These notes made Python and AI actually make sense!"</div>
           <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">January 2025</span></div>
         </div>
         <div class="rv-card">
@@ -707,7 +665,7 @@
             <div class="rv-author"><div class="av av3">PS</div><div><div class="rv-name">Priya Soni</div><div class="rv-role">BCA Student</div></div></div>
             <div class="rv-stars">★★★★★</div>
           </div>
-          <div class="rv-text">"Simple, clear, no jargon. Worth every rupee!"</div>
+          <div class="rv-text">"Simple, clear, no jargon. Part 2 on AI is especially brilliant!"</div>
           <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">January 2025</span></div>
         </div>
       </div>
@@ -754,7 +712,7 @@
     <a href="#" onclick="openLegal('terms');   return false;">Terms</a>
     <a href="#" onclick="openLegal('about');   return false;">About</a>
   </div>
-  <p class="fcopy">© 2026 Mahi's Notes · PDFs readable in-browser only · Made with ❤️ by Mahi</p>
+  <p class="fcopy">© 2026 Mahi's Notes · Readable in-browser only · Made with ❤️ by Mahi</p>
 </footer>
 
 <div class="toast" id="toast"></div>
@@ -784,7 +742,7 @@
   <div class="modal">
     <button class="mx" onclick="closeM('signup')">✕</button>
     <div class="mt">Create Account 🐍</div>
-    <div class="ms">Sign up to save your purchase and access notes anytime.</div>
+    <div class="ms">Sign up to save your purchase and access both parts anytime.</div>
     <button class="btn-google" onclick="doGoogleLogin()">
       <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
       Continue with Google
@@ -804,19 +762,19 @@
 <div class="overlay" id="paymentOverlay">
   <div class="modal wide">
     <button class="mx" onclick="closeM('payment')">✕</button>
-    <div class="mt">Get Part 1 — Python Basics</div>
-    <div class="ms">One-time payment · Access forever from any device.</div>
+    <div class="mt">Get Both Parts — Python for AI</div>
+    <div class="ms">One-time payment · Access both parts forever from any device.</div>
     <div class="bonus-box">
       <span>🎁</span>
-      <span>Pay once → <strong>Part 1 unlocks now</strong>. Future parts unlock automatically — <strong>zero extra payment, ever.</strong></span>
+      <span>Pay once → <strong>Part 1 + Part 2 both unlock instantly</strong>. No extra payments, ever.</span>
     </div>
     <div class="obox">
-      <div class="oline"><span>Part 1 — Python Basics for AI</span><span>₹30</span></div>
-      <div class="oline"><span>GST (18%)</span><span>₹0</span></div>
+      <div class="oline"><span>Part 1 — Python Basics for AI</span><span>✓ Included</span></div>
+      <div class="oline"><span>Part 2 — Deep Python </span><span>✓ Included</span></div>
       <div class="oline tot"><span>Total</span><span>₹30</span></div>
     </div>
     <button class="btn-pay" onclick="doPayment()">🔒 Pay ₹30 with Razorpay</button>
-    <div class="psec">SSL Encrypted · Notes never download to your device</div>
+    <div class="psec">SSL Encrypted · Notes readable in-browser only</div>
   </div>
 </div>
 
@@ -827,20 +785,20 @@
     <div class="succ-inner">
       <div class="succ-icon">🎉</div>
       <div class="succ-title">Payment Successful!</div>
-      <div class="succ-sub">Your purchase is saved to your account. Log in anytime from any device to access your notes.</div>
+      <div class="succ-sub">Both parts are now unlocked and saved to your account. Log in anytime from any device.</div>
       <div class="access-card">
         <div class="ac-row">
           <div class="prow-icon pi-green">📄</div>
-          <div class="prow-info"><div class="prow-title">Part 1 — Python Basics</div><div class="prow-sub">Unlocked ✓ — saved to your account</div></div>
+          <div class="prow-info"><div class="prow-title">Part 1 — Python Basics</div><div class="prow-sub">Unlocked ✓ — available now</div></div>
           <span class="pbadge pb-unlocked">✓ Unlocked</span>
         </div>
         <div class="ac-row">
-          <div class="prow-icon pi-gray">🤖</div>
-          <div class="prow-info"><div class="prow-title">Part 2 — Coming Soon</div><div class="prow-sub">Will unlock automatically for you</div></div>
-          <span class="pbadge pb-soon">Auto ✓</span>
+          <div class="prow-icon pi-green">🤖</div>
+          <div class="prow-info"><div class="prow-title">Part 2 — AI Concepts</div><div class="prow-sub">Unlocked ✓ — available now</div></div>
+          <span class="pbadge pb-unlocked">✓ Unlocked</span>
         </div>
       </div>
-      <button class="mbtn" onclick="afterPayment()">Start Reading Part 1 →</button>
+      <button class="mbtn" onclick="afterPayment()">Start Reading Now →</button>
     </div>
   </div>
 </div>
@@ -849,7 +807,7 @@
 <div class="legal-page" id="refundPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>Refund Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>All products are digital PDF notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email mahi@example.com with your order details.</p>
+  <p>All products are digital notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email mahi@example.com with your order details.</p>
 </div></div>
 
 <div class="legal-page" id="privacyPage"><div class="legal-inner">
@@ -861,23 +819,16 @@
 <div class="legal-page" id="termsPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>Terms of Service</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>By purchasing, you get a personal, non-transferable license to view the notes. You may not share, copy, redistribute, or resell the content. One-time payment grants lifetime personal access including future parts.</p>
+  <p>By purchasing, you get a personal, non-transferable license to view the notes. You may not share, copy, redistribute, or resell the content. One-time payment grants lifetime personal access to all parts.</p>
 </div></div>
 
 <div class="legal-page" id="aboutPage"><div class="legal-inner">
   <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
   <h1>About Mahi's Notes</h1><p class="ldate">Last updated: February 17, 2026</p>
-  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹30 once and get everything — no subscriptions, no hidden costs.</p>
+  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹30 once and get both Part 1 and Part 2 — no subscriptions, no hidden costs.</p>
 </div></div>
 
-<!-- ══════════════════════════════════════════════
-     MAIN SCRIPT  (no type=module — runs normally)
-     All window.* functions set by the module above
-     are safe to call here because they're set on
-     the window object before any user interaction.
-══════════════════════════════════════════════ -->
 <script>
-  // ── globals ──
   window.hasPaid     = false;
   window.currentUser = null;
   var selectedStars  = 0;
@@ -903,7 +854,6 @@
 
   // ── MODALS ──
   var OVS = { login:'loginOverlay', signup:'signupOverlay', payment:'paymentOverlay', success:'successOverlay' };
-
   function openM(k)    { document.getElementById(OVS[k]).classList.add('open');    document.body.style.overflow = 'hidden'; }
   function closeM(k)   { document.getElementById(OVS[k]).classList.remove('open'); document.body.style.overflow = ''; }
   function switchM(a,b){ closeM(a); setTimeout(function(){ openM(b); }, 200); }
@@ -914,22 +864,19 @@
     });
   });
 
-  // ── HANDLE GET PART 1 ──
-  function handleGetPart1() {
+  // ── HANDLE GET ACCESS (both parts) ──
+  function handleGetAccess() {
     if (window.hasPaid) {
-      // Already paid — just show the PDF
       showPDF();
       scrollToId('notes');
       return;
     }
     if (!window.currentUser) {
-      // Not logged in — go to signup first, then auto-open payment after login
       window._pendingPayment = true;
       openM('signup');
       showToast('👆 Create a free account first to save your purchase!');
       return;
     }
-    // Logged in but not paid — show payment
     openM('payment');
   }
 
@@ -948,69 +895,87 @@
     document.getElementById('navLoggedIn').style.display  = 'none';
   }
 
-  // ── UNLOCK UI ──
-  function unlockPart1UI() {
+  // ── UNLOCK ALL UI (both parts) ──
+  function unlockAllUI() {
     window.hasPaid = true;
+
+    // Update Part 1 row
     document.getElementById('badge1').textContent = '✓ Unlocked';
     document.getElementById('badge1').className   = 'pbadge pb-unlocked';
-    var row = document.getElementById('part1Row');
-    row.classList.remove('locked');
-    row.classList.add('unlocked');
-    row.onclick = function(){ showPDF(); scrollToId('notes'); };
-    document.getElementById('noteBtnPart1').textContent = '📖 Read Part 1 Now';
-    document.getElementById('noteBtnPart1').onclick = function(){ showPDF(); scrollToId('notes'); };
+    var row1 = document.getElementById('part1Row');
+    row1.classList.remove('locked');
+    row1.classList.add('unlocked');
+    row1.onclick = function(){ showPDF(); scrollToId('notes'); };
+
+    // Update Part 2 row
+    document.getElementById('badge2').textContent = '✓ Unlocked';
+    document.getElementById('badge2').className   = 'pbadge pb-unlocked';
+    var row2 = document.getElementById('part2Row');
+    row2.classList.remove('locked');
+    row2.classList.add('unlocked');
+    row2.onclick = function(){ showPDF(); switchPart('part2'); scrollToId('notes'); };
+
+    // Update note card button
+    document.getElementById('noteBtnMain').textContent = '📖 Read Notes Now';
+    document.getElementById('noteBtnMain').onclick = function(){ showPDF(); scrollToId('notes'); };
   }
 
-  // ── LOCK UI ──
-  function lockPart1UI() {
+  // ── LOCK ALL UI ──
+  function lockAllUI() {
     window.hasPaid = false;
+
     document.getElementById('badge1').textContent = '🔒 ₹30';
     document.getElementById('badge1').className   = 'pbadge pb-locked';
-    var row = document.getElementById('part1Row');
-    row.classList.add('locked');
-    row.classList.remove('unlocked');
-    row.onclick = handleGetPart1;
-    document.getElementById('noteBtnPart1').textContent = 'Get Part 1 for ₹30 →';
-    document.getElementById('noteBtnPart1').onclick = handleGetPart1;
-    // Hide viewer
+    var row1 = document.getElementById('part1Row');
+    row1.classList.add('locked');
+    row1.classList.remove('unlocked');
+    row1.onclick = handleGetAccess;
+
+    document.getElementById('badge2').textContent = '🔒 Included';
+    document.getElementById('badge2').className   = 'pbadge pb-locked';
+    var row2 = document.getElementById('part2Row');
+    row2.classList.add('locked');
+    row2.classList.remove('unlocked');
+    row2.onclick = handleGetAccess;
+
+    document.getElementById('noteBtnMain').textContent = 'Get Both Parts for ₹30 →';
+    document.getElementById('noteBtnMain').onclick = handleGetAccess;
+
     document.getElementById('pdfViewer').style.display = 'none';
     document.getElementById('pdfFrame').src = 'about:blank';
   }
 
-  // ══════════════════════════════════════════
-  // FIX: showPDF — no setTimeout, load directly
-  // ══════════════════════════════════════════
+  // ── SHOW PDF VIEWER ──
   function showPDF() {
     var viewer = document.getElementById('pdfViewer');
     viewer.style.display = 'block';
-    switchPart('part1');                                          // load iframe immediately
+    switchPart('part1');
     setTimeout(function(){ viewer.scrollIntoView({ behavior: 'smooth' }); }, 150);
   }
 
-  // ══════════════════════════════════════════
-  // FIX: switchPart — set src directly, no delay
-  // ══════════════════════════════════════════
+  // ── SWITCH BETWEEN PARTS ──
   function switchPart(part) {
-    var frame   = document.getElementById('pdfFrame');
-    var overlay = document.getElementById('p2overlay');
-    var tab1    = document.getElementById('tab1');
-    var label   = document.getElementById('viewerLabel');
+    var frame = document.getElementById('pdfFrame');
+    var tab1  = document.getElementById('tab1');
+    var tab2  = document.getElementById('tab2');
+    var label = document.getElementById('viewerLabel');
 
     if (part === 'part1') {
       var url = frame.getAttribute('data-part1');
-      if (frame.src !== url) {           // only reload if different (avoids flicker)
-        frame.src = url;
-      }
-      overlay.classList.remove('show');
+      if (frame.src !== url) frame.src = url;
       tab1.classList.add('active');
+      tab2.classList.remove('active');
       label.textContent = 'Part 1 — Python Basics for AI';
+    } else if (part === 'part2') {
+      var url2 = frame.getAttribute('data-part2');
+      if (frame.src !== url2) frame.src = url2;
+      tab2.classList.add('active');
+      tab1.classList.remove('active');
+      label.textContent = 'Part 2 — AI Concepts';
     }
   }
 
-  // ══════════════════════════════════════════
-  // RESTORE ACCESS — for returning paid users
-  // who aren't seeing the PDF
-  // ══════════════════════════════════════════
+  // ── RESTORE ACCESS ──
   function restoreAccess() {
     if (!window.currentUser) {
       openM('login');
@@ -1023,33 +988,25 @@
       showToast('📖 Here are your notes!');
       return;
     }
-    // Re-check Firestore manually
     showToast('⏳ Checking your purchase status…');
-    // The onAuthStateChanged already ran — if hasPaid is still false,
-    // they haven't paid yet. But re-trigger for safety:
     if (window.firebaseDB && window.currentUser) {
       import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js").then(function(fb) {
         fb.getDoc(fb.doc(window.firebaseDB, "users", window.currentUser.uid)).then(function(snap) {
           if (snap.exists() && snap.data().hasPaid === true) {
             window.hasPaid = true;
-            unlockPart1UI();
+            unlockAllUI();
             showPDF();
             scrollToId('notes');
             showToast('✅ Access restored! Happy learning 🐍');
           } else {
-            showToast('No purchase found on your account. Contact support if you think this is wrong.');
+            showToast('No purchase found. Contact support if you think this is wrong.');
           }
         });
       });
     }
   }
 
-  // ══════════════════════════════════════════
-  // RAZORPAY PAYMENT
-  // FIX: explicitly set window.hasPaid = true
-  //      and call unlockPart1UI() right here
-  //      before waiting for Firestore callback
-  // ══════════════════════════════════════════
+  // ── PAYMENT ──
   function doPayment() {
     if (!window.currentUser) {
       closeM('payment');
@@ -1061,27 +1018,23 @@
 
     var options = {
       key:         "rzp_live_SH9YHcyg04pPiW",
-      amount:      3000,
+      amount:      3900,
       currency:    "INR",
       name:        "Mahi's Notes",
-      description: "Part 1 — Python Basics for AI",
+      description: "Python for AI — Part 1 + Part 2",
       prefill: {
         name:  window.currentUser.displayName || '',
         email: window.currentUser.email       || ''
       },
       handler: async function(response) {
-        // ── FIX: unlock UI immediately, don't wait ──
         window.hasPaid = true;
-        unlockPart1UI();
+        unlockAllUI();
         showToast('⏳ Saving your purchase…');
-
-        // Save to Firestore in background
         var saved = await window.savePaymentToDatabase(response.razorpay_payment_id);
         if (saved) {
           closeM('payment');
           setTimeout(function(){ openM('success'); }, 350);
         } else {
-          // UI is already unlocked — just warn about the save failure
           showToast('⚠️ Purchase active this session but saving failed. Email support with payment ID: ' + response.razorpay_payment_id);
           closeM('payment');
         }
@@ -1101,7 +1054,7 @@
     closeM('success');
     showPDF();
     scrollToId('notes');
-    showToast('🎉 Part 1 unlocked! Happy learning 🐍');
+    showToast('🎉 Both parts unlocked! Happy learning 🐍');
   }
 
   // ── REVIEWS ──
@@ -1114,7 +1067,6 @@
     var name = document.getElementById('rvName').value.trim();
     var role = document.getElementById('rvRole').value.trim();
     var text = document.getElementById('rvText').value.trim();
-
     if (!name || !text || selectedStars === 0) {
       showToast('⚠️ Please fill all fields and select a star rating.');
       return;
@@ -1123,7 +1075,6 @@
       showToast('⚠️ Review system still loading. Try again in a moment.');
       return;
     }
-
     try {
       await window.postReviewToFirebase({
         name:     name,
