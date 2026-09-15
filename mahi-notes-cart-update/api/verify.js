@@ -1,2 +1,0 @@
-const {handler,identity,db,signature,settle}=require('../lib/server');
-module.exports=handler(async(req,res)=>{if(req.method!=='POST')return res.status(405).end();const user=await identity(req);const {razorpay_order_id:o,razorpay_payment_id:p,razorpay_signature:s}=req.body;if(typeof o!=='string'||!/^order_[a-zA-Z0-9]+$/.test(o))throw Error('Invalid order');const order=await db().collection('storeOrders').doc(o).get();if(order.data()?.uid!==user.uid||!signature(o+'|'+p,s,process.env.RAZORPAY_KEY_SECRET))throw Error('Invalid payment');await settle(o,p);res.json({ok:true});});
