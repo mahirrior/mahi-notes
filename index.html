@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mahirrior — Learn. Code. Build. | Mahi Sharma</title>
+  <meta name="description" content="Clear, beginner-friendly Python notes by Mahi. Explore study collections, save your favorites, and build your foundations for AI and machine learning.">
+  <meta name="theme-color" content="#f6f5f0">
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <!-- ══ FIREBASE ══ -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+             signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged,
+             updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, addDoc,
+             query, orderBy, onSnapshot, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBaMcB3vzxDoxxoVPiW5aeKm7N51k3TZ1E",
+      authDomain: "mahi-notes.firebaseapp.com",
+      projectId: "mahi-notes",
+      storageBucket: "mahi-notes.firebasestorage.app",
+      messagingSenderId: "941679481517",
+      appId: "1:941679481517:web:0703d962227a556535ac24",
+      measurementId: "G-ZP89JYGQNG"
+    };
+
+    const app  = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db   = getFirestore(app);
+    const googleProvider = new GoogleAuthProvider();
+
+    window.firebaseDB = db;
+
+    // ── live reviews feed ──
+    const reviewsQuery = query(collection(db, "reviews"), orderBy("timestamp", "desc"), limit(20));
+    onSnapshot(reviewsQuery, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added") {
+          const review = change.doc.data();
+          if (document.getElementById('review-' + change.doc.id)) return;
+          const card = createReviewCard(review, change.doc.id);
+          const feed = document.getElementById('reviewsFeed');
+          if (feed) feed.insertBefore(card, feed.children[3] || null);
+        }
+      });
+    });
+
+    function createReviewCard(review, reviewId) {
+      const safe = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      const starCount = Math.min(5, Math.max(0, Number(review.stars) || 0));
+      const stars = '★'.repeat(starCount) + '☆'.repeat(5 - starCount);
+      const initials = String(review.name || 'Student').split(' ').map(w => w[0] || '').join('').toUpperCase().slice(0, 2);
+      const dateStr  = new Date(review.timestamp).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+      const card = document.createElement('div');
+      card.className = 'rv-card';
+      card.id = 'review-' + reviewId;
+      card.innerHTML = `
+        <div class="rv-top">
+          <div class="rv-author">
+            <div class="av av-new">${safe(initials)}</div>
+            <div><div class="rv-name">${safe(review.name)}</div><div class="rv-role">${safe(review.role || 'Student')}</div></div>
+          </div>
+          <div class="rv-stars">${stars}</div>
+        </div>
+        <div class="rv-text">"${safe(review.text)}"</div>
+        <div class="rv-foot">
+          ${review.verified ? '<span class="rv-verified">✓ Verified Buyer</span>' : ''}
+          <span class="rv-date">${dateStr}</span>
+        </div>`;
+      return card;
+    }
+
+    window.postReviewToFirebase = async function(reviewData) {
+      await addDoc(collection(db, "reviews"), {
+        name:      reviewData.name,
+        role:      reviewData.role,
+        text:      reviewData.text,
+        stars:     reviewData.stars,
+        verified:  false,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date()
+      });
+    };
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        window.currentUser = user;
+        updateNavForLoggedIn(user);
+        await window.refreshPurchases?.();
+      } else {
+        window.currentUser = null;
+        window.hasPaid     = false;
+        updateNavForLoggedOut();
+        window.clearPurchases?.();
+      }
+    });
+
+    window.doSignup = async function() {
+      const name  = document.getElementById('signupName').value.trim();
+      const email = document.getElementById('signupEmail').value.trim();
+      const pass  = document.getElementById('signupPass').value;
+      if (!name)           { showToast('⚠️ Please enter your name.');              return; }
+      if (!email)          { showToast('⚠️ Please enter your email.');             return; }
+      if (pass.length < 6) { showToast('⚠️ Password must be at least 6 chars.'); return; }
+      const btn = document.getElementById('signupBtn');
+      btn.textContent = 'Creating account…';
+      btn.disabled = true;
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, pass);
+        await updateProfile(cred.user, { displayName: name });
+        await setDoc(doc(db, "users", cred.user.uid), {
+          name, email,  createdAt: new Date().toISOString()
+        }, { merge: true });
+        closeM('signup');
+        showToast('🎉 Account created! Welcome ' + name + '!');
+        if (window._pendingPayment) {
+          window._pendingPayment = false;
+          setTimeout(() => openM('payment'), 400);
+        }
+      } catch (err) {
+        showToast(err.code === 'auth/email-already-in-use'
+          ? '⚠️ Email already registered. Please log in.'
+          : '⚠️ Error: ' + err.message);
+      } finally {
+        btn.textContent = 'Create Account →';
+        btn.disabled = false;
+      }
+    };
+
+    window.doLogin = async function() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const pass  = document.getElementById('loginPass').value;
+      if (!email) { showToast('⚠️ Please enter your email.');    return; }
+      if (!pass)  { showToast('⚠️ Please enter your password.'); return; }
+      const btn = document.getElementById('loginBtn');
+      btn.textContent = 'Logging in…';
+      btn.disabled = true;
+      try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        closeM('login');
+      } catch (err) {
+        showToast(err.code === 'auth/invalid-credential'
+          ? '⚠️ Wrong email or password.'
+          : '⚠️ Error: ' + err.message);
+      } finally {
+        btn.textContent = 'Log In →';
+        btn.disabled = false;
+      }
+    };
+
+    window.doGoogleLogin = async function() {
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const user   = result.user;
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (!userDoc.exists()) {
+          await setDoc(doc(db, "users", user.uid), {
+            name:      user.displayName,
+            email:     user.email,
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        }
+        closeM('login');
+        closeM('signup');
+        if (window._pendingPayment) {
+          window._pendingPayment = false;
+          setTimeout(() => openM('payment'), 400);
+        }
+      } catch (err) {
+        showToast('⚠️ Google login failed. Try again.');
+        console.error(err);
+      }
+    };
+
+    window.doLogout = async function() {
+      await signOut(auth);
+      window.hasPaid      = false;
+      window.currentUser  = null;
+      lockAllUI();
+      showToast('👋 Logged out successfully.');
+    };
+
+
+  </script>
+
+
+  <style>
+    :root {
+      --bg:#0a150f; --bg2:#0f1e15; --card:#132820; --card2:#1a3028;
+      --green:#00e5a0; --green2:#00c48a; --green-dim:rgba(0,229,160,0.10);
+      --green-glow:rgba(0,229,160,0.22); --blue:#3b82f6;
+      --gold:#fbbf24; --white:#f0f6ff; --gray:#7a8fa8; --gray2:#4a5f75;
+      --border:rgba(255,255,255,0.07); --border-green:rgba(0,229,160,0.22);
+    }
+    *{margin:0;padding:0;box-sizing:border-box;}
+    html{scroll-behavior:smooth;}
+    body{font-family:'Cabinet Grotesk','DM Sans',sans-serif;background:var(--bg);color:var(--white);overflow-x:hidden;}
+
+    /* ── NAV ── */
+    nav{position:fixed;top:0;left:0;right:0;z-index:200;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 6%;background:rgba(8,13,23,0.92);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);}
+    .nav-logo{font-family:'Clash Display',sans-serif;font-weight:700;font-size:1.3rem;color:var(--white);text-decoration:none;display:flex;align-items:center;gap:0.5rem;}
+    .logo-dot{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 8px var(--green);animation:pdot 2s infinite;}
+    @keyframes pdot{0%,100%{box-shadow:0 0 8px var(--green);}50%{box-shadow:0 0 18px var(--green),0 0 30px var(--green-glow);}}
+    .nav-links{display:flex;gap:2.2rem;list-style:none;}
+    .nav-links a{color:var(--gray);text-decoration:none;font-size:0.88rem;font-weight:500;transition:color .2s;}
+    .nav-links a:hover,.nav-links a.active{color:var(--white);}
+    .nav-actions{display:flex;gap:0.6rem;align-items:center;}
+    .btn-login{padding:.4rem 1.1rem;border:1px solid var(--border);background:transparent;color:var(--gray);border-radius:8px;cursor:pointer;font-family:'Cabinet Grotesk',sans-serif;font-size:.85rem;transition:all .2s;}
+    .btn-login:hover{color:var(--white);border-color:rgba(255,255,255,.2);}
+    .btn-signup{padding:.4rem 1.1rem;background:var(--green);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.85rem;font-weight:600;transition:all .2s;}
+    .btn-signup:hover{background:var(--green2);transform:translateY(-1px);}
+    .nav-user{display:none;align-items:center;gap:.7rem;}
+    .nav-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--green),var(--blue));display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:var(--bg);}
+    .nav-uname{font-size:.83rem;color:var(--white);font-weight:500;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .btn-logout{padding:.35rem .9rem;border:1px solid rgba(248,113,113,.3);background:transparent;color:#f87171;border-radius:7px;cursor:pointer;font-size:.78rem;font-family:'Cabinet Grotesk',sans-serif;transition:all .2s;}
+    .btn-logout:hover{background:rgba(248,113,113,.1);}
+
+    /* ── HERO ── */
+    #home{min-height:100vh;display:flex;align-items:center;padding:80px 6% 60px;position:relative;overflow:hidden;background:radial-gradient(ellipse 70% 60% at 70% 20%,rgba(0,229,160,0.07) 0%,transparent 65%),radial-gradient(ellipse 50% 50% at 10% 70%,rgba(59,130,246,0.05) 0%,transparent 60%),var(--bg);}
+    .hero-grid{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:5rem;align-items:center;width:100%;}
+    .hero-tag{display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border-green);border-radius:20px;padding:.3rem 1rem;font-size:.77rem;color:var(--green);font-weight:600;margin-bottom:1.4rem;background:var(--green-dim);}
+    h1{font-family:'Clash Display',sans-serif;font-size:clamp(2.1rem,3.8vw,3.3rem);font-weight:700;line-height:1.1;letter-spacing:-1.5px;margin-bottom:1.1rem;}
+    h1 .accent{color:var(--green);}
+    .hero-desc{color:var(--gray);font-size:1rem;line-height:1.78;max-width:420px;margin-bottom:1.8rem;}
+    .hero-btns{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2rem;}
+    .btn-primary{padding:.85rem 2rem;background:var(--green);color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.95rem;font-weight:700;transition:all .25s;}
+    .btn-primary:hover{background:var(--green2);transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,229,160,.28);}
+    .btn-ghost{padding:.85rem 2rem;background:transparent;border:1px solid var(--border);color:var(--white);border-radius:10px;cursor:pointer;font-family:'Cabinet Grotesk',sans-serif;font-size:.95rem;font-weight:500;transition:all .2s;}
+    .btn-ghost:hover{border-color:rgba(255,255,255,.25);}
+    .hero-pills{display:flex;gap:.75rem;flex-wrap:wrap;}
+    .pill{display:flex;align-items:center;gap:.4rem;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:20px;padding:.3rem .9rem;font-size:.78rem;color:var(--gray);}
+    .hero-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:1.8rem;box-shadow:0 40px 80px rgba(0,0,0,.5);position:relative;}
+    .hero-card::before{content:'';position:absolute;top:-1px;left:15%;right:15%;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);border-radius:2px;}
+    .card-chip{display:inline-flex;align-items:center;gap:.4rem;background:var(--green-dim);border:1px solid var(--border-green);border-radius:6px;padding:.25rem .75rem;font-size:.7rem;color:var(--green);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:1.2rem;}
+    .prow{border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:.7rem;display:flex;align-items:center;gap:.9rem;transition:all .25s;}
+    .prow.unlocked{border-color:var(--border-green);background:rgba(0,229,160,.05);}
+    .prow.locked{cursor:pointer;}
+    .prow.locked:hover{border-color:rgba(0,229,160,.25);background:rgba(0,229,160,.03);}
+    .prow-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;}
+    .pi-green{background:rgba(0,229,160,.15);}
+    .pi-gold{background:rgba(251,191,36,.12);}
+    .pi-blue{background:rgba(59,130,246,.12);}
+    .pi-gray{background:rgba(100,116,139,.1);}
+    .prow-info{flex:1;}
+    .prow-title{font-size:.88rem;font-weight:600;margin-bottom:2px;}
+    .prow-sub{font-size:.74rem;color:var(--gray);}
+    .pbadge{font-size:.69rem;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;}
+    .pb-free{background:rgba(0,229,160,.15);color:var(--green);}
+    .pb-locked{background:rgba(251,191,36,.12);color:var(--gold);}
+    .pb-unlocked{background:rgba(0,229,160,.15);color:var(--green);}
+    .pb-soon{background:rgba(100,116,139,.12);color:var(--gray);}
+    .price-row{margin-top:1.2rem;padding:1rem 1.1rem;background:linear-gradient(135deg,rgba(0,229,160,.08),rgba(59,130,246,.05));border:1px solid var(--border-green);border-radius:12px;display:flex;align-items:center;justify-content:space-between;}
+    .price-main{font-family:'Clash Display',sans-serif;font-size:1.9rem;font-weight:700;}
+    .price-note{font-size:.72rem;color:var(--gray);margin-top:1px;}
+    .btn-ga{padding:.6rem 1.4rem;background:var(--green);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:'Clash Display',sans-serif;font-weight:700;font-size:.88rem;transition:all .2s;}
+    .btn-ga:hover{background:var(--green2);transform:scale(1.03);}
+
+    /* ── SECTIONS ── */
+    section{padding:90px 6%;position:relative;z-index:1;}
+    .si{max-width:1100px;margin:0 auto;}
+    .eyebrow{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:2.5px;color:var(--green);margin-bottom:.8rem;}
+    .stitle{font-family:'Clash Display',sans-serif;font-size:clamp(1.7rem,2.8vw,2.4rem);font-weight:700;letter-spacing:-1px;margin-bottom:.9rem;line-height:1.2;}
+    .ssub{color:var(--gray);font-size:.97rem;line-height:1.75;max-width:520px;}
+
+    /* ── NOTES CARD ── */
+    #notes{background:rgba(255,255,255,.013);}
+    .note-card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:all .3s;max-width:600px;margin-top:2.5rem;}
+    .note-card:hover{border-color:rgba(0,229,160,.22);box-shadow:0 20px 50px rgba(0,0,0,.35);}
+    .note-top{height:130px;display:flex;align-items:center;justify-content:center;font-size:3rem;background:linear-gradient(135deg,#0a2a1a,#0d4a2a 60%,#115930);position:relative;}
+    .ntbadge{position:absolute;top:10px;right:10px;font-size:.68rem;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(0,229,160,.2);color:var(--green);text-transform:uppercase;letter-spacing:.5px;}
+    .note-body{padding:1.4rem;}
+    .note-cat{font-size:.7rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--green);font-weight:700;margin-bottom:.4rem;}
+    .note-title{font-family:'Clash Display',sans-serif;font-size:1.2rem;font-weight:700;margin-bottom:.6rem;}
+    .note-desc{font-size:.85rem;color:var(--gray);line-height:1.7;margin-bottom:1.1rem;}
+    .parts-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1.2rem;}
+    .pc{display:flex;align-items:center;gap:.6rem;font-size:.82rem;}
+    .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+    .dg{background:var(--green);box-shadow:0 0 6px var(--green);}
+    .db{background:var(--blue);box-shadow:0 0 6px var(--blue);}
+    .dy{background:var(--gold);}
+    .dq{background:var(--gray2);}
+    .pc span{color:var(--gray);}
+    .note-footer{padding:.9rem 1.4rem;border-top:1px solid var(--border);display:flex;gap:.7rem;flex-wrap:wrap;align-items:center;}
+    .btn-pb{flex:1;padding:.55rem .8rem;background:var(--green);border:none;color:var(--bg);border-radius:8px;cursor:pointer;font-size:.83rem;font-family:'Clash Display',sans-serif;font-weight:600;transition:all .2s;}
+    .btn-pb:hover{background:var(--green2);}
+    .restore-link{font-size:.75rem;color:var(--gray);cursor:pointer;text-decoration:underline;white-space:nowrap;}
+    .restore-link:hover{color:var(--green);}
+
+    /* ── PDF VIEWER ── */
+    #pdfViewer{display:none;margin-top:2rem;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--card);}
+    .viewer-header{padding:1rem 1.4rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:.8rem;}
+    .viewer-title{font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:600;display:flex;align-items:center;gap:.6rem;}
+    .viewer-tabs{display:flex;gap:.5rem;}
+    .vtab{padding:.4rem 1rem;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--gray);cursor:pointer;font-size:.82rem;font-family:'Cabinet Grotesk',sans-serif;transition:all .2s;}
+    .vtab.active{background:var(--green);color:var(--bg);border-color:var(--green);font-weight:600;}
+    .vtab:not(.active):hover{border-color:rgba(0,229,160,.3);color:var(--white);}
+    .pdf-frame-wrap{position:relative;}
+    .pdf-frame-wrap iframe{width:100%;height:560px;border:none;display:block;background:#fff;}
+
+    /* ── HOW IT WORKS ── */
+    #how{background:var(--bg2);}
+    .steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin-top:3rem;}
+    .step-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.8rem;}
+    .step-num{font-family:'Clash Display',sans-serif;font-size:2.8rem;font-weight:700;color:rgba(0,229,160,.1);line-height:1;margin-bottom:1rem;}
+    .step-icon{font-size:1.6rem;margin-bottom:.8rem;display:block;}
+    .step-title{font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:600;margin-bottom:.5rem;}
+    .step-desc{font-size:.84rem;color:var(--gray);line-height:1.68;}
+
+    /* ── REVIEWS ── */
+    #reviews{background:rgba(255,255,255,.013);}
+    .reviews-layout{display:grid;grid-template-columns:1fr 1.6fr;gap:3rem;margin-top:3rem;align-items:start;}
+    .write-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:1.6rem;}
+    .wc-title{font-family:'Clash Display',sans-serif;font-size:1.05rem;font-weight:700;margin-bottom:.3rem;}
+    .wc-sub{font-size:.82rem;color:var(--gray);margin-bottom:1.1rem;line-height:1.6;}
+    .star-row{display:flex;gap:.35rem;margin-bottom:1rem;}
+    .sbtn{font-size:1.5rem;cursor:pointer;background:none;border:none;color:var(--gray2);line-height:1;transition:transform .15s,color .15s;padding:0;}
+    .sbtn.lit{color:var(--gold);}
+    .sbtn:hover{transform:scale(1.25);}
+    .rform{display:flex;flex-direction:column;gap:.75rem;}
+    .rform input,.rform textarea{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:9px;padding:.68rem 1rem;color:var(--white);font-family:'Cabinet Grotesk',sans-serif;font-size:.88rem;outline:none;transition:border-color .2s;}
+    .rform input:focus,.rform textarea:focus{border-color:rgba(0,229,160,.4);}
+    .rform input::placeholder,.rform textarea::placeholder{color:var(--gray2);}
+    .rform textarea{resize:vertical;min-height:90px;}
+    .buyer-note{font-size:.74rem;color:var(--gray2);display:flex;align-items:center;gap:.35rem;}
+    .btn-post{padding:.7rem 1.5rem;background:var(--green);color:var(--bg);border:none;border-radius:9px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.9rem;font-weight:700;transition:all .2s;align-self:flex-start;}
+    .btn-post:hover{background:var(--green2);}
+    .reviews-feed{display:flex;flex-direction:column;gap:.95rem;max-height:680px;overflow-y:auto;padding-right:4px;}
+    .reviews-feed::-webkit-scrollbar{width:4px;}
+    .reviews-feed::-webkit-scrollbar-track{background:transparent;}
+    .reviews-feed::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+    .rv-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.3rem;transition:all .3s;animation:rvin .4s ease both;}
+    @keyframes rvin{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+    .rv-card:hover{border-color:rgba(0,229,160,.2);}
+    .rv-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;}
+    .rv-author{display:flex;align-items:center;gap:.7rem;}
+    .av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex-shrink:0;}
+    .av1{background:linear-gradient(135deg,#00e5a0,#0d9488);color:var(--bg);}
+    .av2{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;}
+    .av3{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;}
+    .av-new{background:linear-gradient(135deg,#00e5a0,#3b82f6);color:var(--bg);}
+    .rv-name{font-weight:600;font-size:.88rem;}
+    .rv-role{font-size:.74rem;color:var(--gray);}
+    .rv-stars{color:var(--gold);font-size:.82rem;letter-spacing:1.5px;}
+    .rv-text{font-size:.86rem;color:rgba(240,246,255,.82);line-height:1.7;margin-bottom:.55rem;}
+    .rv-foot{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;}
+    .rv-date{font-size:.72rem;color:var(--gray2);}
+    .rv-verified{display:inline-flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--green);font-weight:600;background:var(--green-dim);border-radius:20px;padding:2px 8px;}
+
+    /* ── CONTACT ── */
+    #contact{background:var(--bg2);}
+    .contact-grid{display:grid;grid-template-columns:1fr 1.2fr;gap:5rem;margin-top:3rem;align-items:start;}
+    .c-blurb{color:var(--gray);font-size:.94rem;line-height:1.78;margin-bottom:2rem;}
+    .ci{display:flex;gap:1rem;margin-bottom:1.5rem;}
+    .c-icon{width:42px;height:42px;border-radius:10px;background:var(--green-dim);border:1px solid var(--border-green);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;}
+    .c-label{font-size:.72rem;text-transform:uppercase;letter-spacing:1px;color:var(--gray);margin-bottom:2px;}
+    .c-val{font-size:.92rem;color:var(--white);font-weight:500;}
+    .cform{display:flex;flex-direction:column;gap:.9rem;}
+    .frow{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;}
+    .fg{display:flex;flex-direction:column;gap:.38rem;}
+    label{font-size:.78rem;color:var(--gray);font-weight:500;}
+    input,textarea{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:.72rem 1rem;color:var(--white);font-family:'Cabinet Grotesk',sans-serif;font-size:.9rem;outline:none;transition:border-color .2s;}
+    input:focus,textarea:focus{border-color:rgba(0,229,160,.4);}
+    input::placeholder,textarea::placeholder{color:var(--gray2);}
+    textarea{resize:vertical;min-height:100px;}
+    .btn-send{padding:.85rem 2rem;background:var(--green);color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.93rem;font-weight:700;transition:all .2s;align-self:flex-start;}
+    .btn-send:hover{background:var(--green2);transform:translateY(-1px);}
+
+    /* ── FOOTER ── */
+    footer{background:var(--bg);border-top:1px solid var(--border);padding:2.5rem 6%;text-align:center;}
+    .flogo{font-family:'Clash Display',sans-serif;font-size:1.2rem;font-weight:700;margin-bottom:.6rem;display:flex;align-items:center;justify-content:center;gap:.5rem;}
+    .flinks{display:flex;gap:2rem;justify-content:center;margin:1rem 0;flex-wrap:wrap;}
+    .flinks a{color:var(--gray);text-decoration:none;font-size:.83rem;transition:color .2s;}
+    .flinks a:hover{color:var(--white);}
+    .fcopy{color:var(--gray2);font-size:.77rem;line-height:1.6;}
+
+    /* ── MODALS ── */
+    .overlay{display:none;position:fixed;inset:0;z-index:999;background:rgba(5,10,20,.9);backdrop-filter:blur(10px);align-items:center;justify-content:center;}
+    .overlay.open{display:flex;}
+    .modal{background:var(--card);border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:2rem;width:90%;max-width:420px;box-shadow:0 40px 100px rgba(0,0,0,.6);position:relative;animation:slideUp .3s ease;max-height:90vh;overflow-y:auto;}
+    .modal.wide{max-width:460px;}
+    @keyframes slideUp{from{opacity:0;transform:translateY(22px);}to{opacity:1;transform:translateY(0);}}
+    .mx{position:absolute;top:1rem;right:1rem;background:none;border:none;color:var(--gray);cursor:pointer;font-size:1.1rem;line-height:1;transition:color .2s;}
+    .mx:hover{color:var(--white);}
+    .mt{font-family:'Clash Display',sans-serif;font-size:1.4rem;font-weight:700;margin-bottom:.35rem;}
+    .ms{color:var(--gray);font-size:.85rem;margin-bottom:1.4rem;line-height:1.6;}
+    .mf{display:flex;flex-direction:column;gap:.82rem;}
+    .mf input{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);}
+    .mbtn{padding:.8rem;background:var(--green);color:var(--bg);border:none;border-radius:9px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:.95rem;font-weight:700;width:100%;transition:all .2s;margin-top:.3rem;}
+    .mbtn:hover{background:var(--green2);}
+    .msw{text-align:center;margin-top:.9rem;font-size:.83rem;color:var(--gray);}
+    .msw a{color:var(--green);text-decoration:none;cursor:pointer;font-weight:600;}
+    .btn-google{padding:.75rem;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:var(--white);border-radius:9px;cursor:pointer;font-family:'Cabinet Grotesk',sans-serif;font-size:.9rem;font-weight:500;width:100%;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:.6rem;margin-bottom:.7rem;}
+    .btn-google:hover{background:rgba(255,255,255,.1);}
+    .or-divider{display:flex;align-items:center;gap:.8rem;margin-bottom:.9rem;}
+    .or-divider::before,.or-divider::after{content:'';flex:1;height:1px;background:var(--border);}
+    .or-divider span{font-size:.75rem;color:var(--gray2);}
+    .obox{background:rgba(255,255,255,.04);border-radius:10px;padding:1rem;margin-bottom:1rem;border:1px solid var(--border);}
+    .oline{display:flex;justify-content:space-between;font-size:.84rem;color:var(--gray);margin-bottom:.4rem;}
+    .oline.tot{color:var(--white);font-weight:700;border-top:1px solid var(--border);padding-top:.6rem;margin-top:.4rem;font-size:.95rem;}
+    .bonus-box{background:var(--green-dim);border:1px solid var(--border-green);border-radius:10px;padding:.9rem;margin-bottom:1rem;font-size:.82rem;color:var(--green);line-height:1.65;display:flex;gap:.6rem;align-items:flex-start;}
+    .btn-pay{padding:.85rem;background:linear-gradient(135deg,var(--green),var(--green2));color:var(--bg);border:none;border-radius:10px;cursor:pointer;font-family:'Clash Display',sans-serif;font-size:1rem;font-weight:700;width:100%;transition:all .2s;margin-top:.5rem;}
+    .btn-pay:hover{transform:translateY(-1px);box-shadow:0 10px 28px rgba(0,229,160,.28);}
+    .psec{text-align:center;font-size:.71rem;color:var(--gray2);margin-top:.6rem;}
+    .succ-inner{text-align:center;padding:.8rem 0;}
+    .succ-icon{font-size:3.5rem;margin-bottom:.9rem;}
+    .succ-title{font-family:'Clash Display',sans-serif;font-size:1.55rem;font-weight:700;margin-bottom:.5rem;color:var(--green);}
+    .succ-sub{color:var(--gray);font-size:.88rem;line-height:1.7;margin-bottom:1.4rem;}
+    .access-card{background:var(--green-dim);border:1px solid var(--border-green);border-radius:12px;padding:1rem;text-align:left;margin-bottom:1.2rem;}
+    .ac-row{display:flex;align-items:center;gap:.8rem;padding:.5rem 0;}
+    .ac-row+.ac-row{border-top:1px solid rgba(255,255,255,.06);}
+
+    /* ── TOAST ── */
+    .toast{position:fixed;bottom:2rem;right:2rem;z-index:9999;background:var(--card2);border:1px solid var(--border-green);color:var(--white);padding:.9rem 1.4rem;border-radius:10px;font-size:.88rem;font-weight:500;box-shadow:0 10px 40px rgba(0,0,0,.4);transform:translateY(80px);opacity:0;transition:all .4s ease;pointer-events:none;max-width:320px;display:flex;gap:.6rem;align-items:center;}
+    .toast.show{transform:translateY(0);opacity:1;}
+
+    /* ── LEGAL PAGES ── */
+    .legal-page{display:none;position:fixed;inset:0;z-index:998;background:var(--bg);overflow-y:auto;padding:80px 6% 60px;}
+    .legal-page.open{display:block;}
+    .legal-inner{max-width:800px;margin:0 auto;}
+    .legal-back{display:inline-flex;align-items:center;gap:.5rem;color:var(--green);font-size:.85rem;font-weight:600;cursor:pointer;margin-bottom:2rem;}
+    .legal-page h1{font-family:'Clash Display',sans-serif;font-size:2.2rem;margin-bottom:.5rem;}
+    .legal-page .ldate{font-size:.82rem;color:var(--gray);margin-bottom:2.5rem;}
+    .legal-page h2{font-family:'Clash Display',sans-serif;font-size:1.4rem;margin-top:2.5rem;margin-bottom:1rem;}
+    .legal-page p{font-size:.94rem;line-height:1.8;color:var(--gray);margin-bottom:1.2rem;}
+    .legal-page ul{margin-left:1.5rem;margin-bottom:1.2rem;}
+    .legal-page li{font-size:.94rem;line-height:1.8;color:var(--gray);margin-bottom:.5rem;}
+    .legal-page strong{color:var(--white);}
+    .legal-page a{color:var(--green);}
+
+    /* ── RESPONSIVE ── */
+    @media(max-width:900px){
+      .hero-grid,.reviews-layout,.contact-grid{grid-template-columns:1fr;}
+      .steps-grid{grid-template-columns:1fr;}
+      .nav-links{display:none;}
+      section{padding:70px 4%;}
+    }
+    @media(max-width:600px){
+      .frow{grid-template-columns:1fr;}
+      nav{padding:0 4%;}
+    }
+  </style>
+<style id="studioStyles">
+/* Presentation layer. Existing integration selectors are retained. */
+:root{--bg:#101210;--bg2:#161915;--card:#1c201b;--card2:#252b23;--green:#d4f77d;--green2:#bfdf70;--green-dim:rgba(212,247,125,.08);--green-glow:rgba(212,247,125,.14);--border-green:rgba(212,247,125,.26);--white:#f3f2e9;--gray:#a3aa9b;--gray2:#89917f;--border:rgba(222,230,210,.12);--blue:#9ebcd6;--gold:#e8cc87;--sans:Arial,Helvetica,sans-serif;--mono:'Courier New',monospace}
+body,button,input,textarea,select{font-family:var(--sans)!important}h1,h2,h3,.stitle,.nav-logo,.note-title,.mt,.price-main,.flogo{font-family:var(--sans)!important}button,a,input,select,summary,[tabindex]{-webkit-tap-highlight-color:transparent}button{touch-action:manipulation}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--green);outline-offset:5px}button:disabled{cursor:not-allowed;opacity:.65}a{color:inherit}section{scroll-margin-top:90px;padding:96px 6%}.si{max-width:1220px}::selection{background:var(--green);color:#101210}[hidden]{display:none!important}
+.skip-link{position:fixed;top:-70px;left:20px;z-index:10000;background:var(--green);color:#101210;padding:12px}.skip-link:focus{top:10px}.scroll-meter{position:fixed;inset:0 auto auto 0;height:2px;background:var(--green);z-index:1001;width:0;pointer-events:none}nav{height:78px;padding:0 6%;background:rgba(16,18,16,.92);gap:22px}nav .nav-logo{font-size:1.13rem;letter-spacing:-.6px;white-space:nowrap}.logo-mark{display:inline-grid;place-items:center;width:33px;height:33px;border:1px solid var(--green);color:var(--green);font:700 16px var(--mono);border-radius:9px;margin-right:4px}.nav-links{gap:24px;flex:1;justify-content:center}.nav-links a{font-size:.78rem}.nav-actions{gap:8px}.btn-signup{padding:11px 17px;border-radius:6px}.btn-login{padding:10px 13px;border-radius:6px}.nav-tools{display:flex;gap:8px}.icon-button{border:1px solid var(--border);background:transparent;color:var(--white);border-radius:6px;width:37px;height:37px;cursor:pointer;display:inline-grid;place-items:center;font-size:17px}.menu-button{display:none}.mobile-nav{position:fixed;z-index:199;top:78px;left:0;right:0;background:var(--bg2);padding:20px 6%;border-bottom:1px solid var(--border)}.mobile-nav a{display:block;padding:13px 0;text-decoration:none}
+#home{min-height:760px;padding:145px 6% 66px;background:radial-gradient(ellipse at 88% 24%,rgba(153,177,87,.08),transparent 52%),var(--bg)}#home::before{content:'';position:absolute;inset:0;opacity:.14;background-image:linear-gradient(var(--gray2) 1px,transparent 1px),linear-gradient(90deg,var(--gray2) 1px,transparent 1px);background-size:72px 72px;mask-image:linear-gradient(90deg,transparent 30%,black)}.hero-grid{max-width:1220px;grid-template-columns:1.1fr 1fr;gap:60px;position:relative}.hero-tag{font:11px var(--mono);letter-spacing:1.2px;text-transform:uppercase;border:0;border-radius:0;padding:0;background:none;margin-bottom:25px}.hero-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 5px var(--green-dim)}h1{font-size:clamp(3rem,5.3vw,5rem);line-height:1.03;letter-spacing:-4px;font-weight:500;margin-bottom:24px}h1 .accent{font-family:Georgia,serif;font-weight:400;font-style:italic}.hero-desc{font-size:15px;line-height:1.8;max-width:445px;margin-bottom:28px}.hero-btns{gap:12px;margin-bottom:27px}.btn-primary,.btn-ghost{padding:15px 20px;border-radius:6px;font-size:13px}.btn-primary:hover{box-shadow:0 8px 25px rgba(212,247,125,.12)}.creator-byline{display:flex;align-items:center;gap:11px;margin-top:28px;color:var(--gray);font-size:11px;line-height:1.65}.creator-avatar{width:35px;height:35px;border-radius:50%;background:#d6ccb5;color:#23271b;display:grid;place-items:center;font-family:Georgia,serif;font-style:italic;font-size:21px}.creator-byline strong{color:var(--white);font-size:12px;font-weight:500}.hero-pills{gap:14px}.pill{font:10px var(--mono);padding:0;border:0;background:none;border-radius:0;color:var(--gray)}.pill::before{content:'✓';color:var(--green)}
+.studio{position:relative;min-width:0;padding:14px 0 20px}.studio-label{display:flex;justify-content:space-between;align-items:center;font:10px var(--mono);letter-spacing:1.5px;color:var(--gray);margin-bottom:16px}.studio-label span:last-child{color:var(--green)}.workbook{position:relative;overflow:hidden;min-height:276px;padding:30px 32px 25px 44px;border:1px solid #d3e0af;border-radius:4px 15px 15px 4px;background:#d7e8b4;color:#263322;box-shadow:14px 14px 0 -5px #293022,15px 15px 0 -5px #657149,25px 32px 55px #0004;transform:rotate(-3deg);transition:transform .4s}.workbook:hover{transform:rotate(0) translateY(-5px)}.workbook::before{content:'';position:absolute;inset:0 auto 0 16px;width:1px;background:#83936866}.book-kicker{font:10px var(--mono);letter-spacing:2px}.book-title{font-size:49px;line-height:1;letter-spacing:-2.5px;font-weight:600;margin:27px 0 12px;position:relative;z-index:1}.book-subtitle{font:11px var(--mono);position:relative;z-index:1}.book-footer{display:flex;justify-content:space-between;font:9px var(--mono);letter-spacing:1px;margin-top:30px;border-top:1px solid #71865766;padding-top:15px}.book-symbol{position:absolute;right:18px;top:71px;font:110px Georgia,serif;color:#839c5744;transform:rotate(-10deg)}.studio .hero-card{margin:29px 0 0 45px;padding:16px;border-radius:10px;background:var(--card);box-shadow:0 16px 50px #0003}.hero-card::before{display:none}.card-chip{font:9px var(--mono);letter-spacing:1px;margin-bottom:12px;border:0;background:transparent;padding:0}.prow{padding:9px;margin-bottom:7px;border-radius:6px;gap:9px}.prow-icon{width:29px;height:29px;font:11px var(--mono);border-radius:4px}.prow-title{font-size:11px}.prow-sub{font-size:10px}.pbadge{font:9px var(--mono)}.price-row{margin-top:10px;padding:10px;border-radius:6px;background:var(--green-dim)}.price-main{font-size:25px}.price-note{font-size:9px}.btn-ga{font-size:11px;padding:10px 13px;border-radius:5px}.hero-foot{position:absolute;bottom:18px;left:6%;right:6%;display:flex;justify-content:space-between;font:9px var(--mono);letter-spacing:1.3px;color:var(--gray2)}
+.topic-strip{border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg2);padding:22px 6%;display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;color:var(--gray);font:11px var(--mono)}.topic-strip b{color:var(--green);font-weight:400}.eyebrow{font:10px var(--mono);letter-spacing:2px;margin-bottom:18px}.stitle{font-size:clamp(29px,3.2vw,43px);font-weight:500;letter-spacing:-1.8px}.ssub{font-size:14px}.section-heading{display:flex;justify-content:space-between;align-items:end;gap:25px}.section-index{font:12px var(--mono);color:var(--gray2)}#notes{background:var(--bg)}.catalog-toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;margin:32px 0 22px}.search-box{position:relative;flex:1;max-width:375px}.search-box input{width:100%;padding:13px 38px;background:var(--bg2);font-size:12px;border-radius:6px}.search-box span{position:absolute;left:13px;top:12px;color:var(--gray)}.search-box kbd{position:absolute;right:12px;top:11px;border:1px solid var(--border);padding:2px 5px;border-radius:3px;color:var(--gray2);font-size:10px}.filters{display:flex;gap:5px;flex-wrap:wrap}.filter{padding:9px 13px;background:transparent;color:var(--gray);border:1px solid transparent;border-radius:5px;font-size:11px;cursor:pointer}.filter[aria-pressed=true]{border-color:var(--border-green);color:var(--green);background:var(--green-dim)}.catalog-meta{display:flex;justify-content:space-between;color:var(--gray2);font:10px var(--mono);margin-bottom:17px}.catalog-meta select{background:transparent;color:var(--gray);border:0;font-size:10px;max-width:130px}.catalog-meta option{background:var(--bg)}.catalog-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}.catalog-card{min-width:0;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--card);display:flex;flex-direction:column;transition:transform .25s,border-color .25s,box-shadow .25s}.catalog-card:hover{transform:translateY(-6px);border-color:var(--border-green);box-shadow:0 18px 34px #0002}.catalog-cover{height:187px;background:#d7e8b4;position:relative;padding:24px;color:#283521;overflow:hidden}.catalog-cover.python{background:#d7e8b4}.catalog-cover.ml{background:#d3d6ed;color:#373650}.catalog-cover.ai{background:#ead6bc;color:#67482d}.cover-grid{position:absolute;inset:0;background-image:linear-gradient(#0000000b 1px,transparent 1px),linear-gradient(90deg,#0000000b 1px,transparent 1px);background-size:22px 22px}.cover-overline{font:9px var(--mono);letter-spacing:1.5px;position:relative}.cover-title{font-size:33px;letter-spacing:-1px;line-height:1.05;position:relative;margin-top:27px;max-width:240px;white-space:pre-line}.cover-glyph{position:absolute;right:20px;bottom:22px;font:58px Georgia,serif;opacity:.2}.save-note{position:absolute;right:15px;top:15px;width:30px;height:30px;border:1px solid #0002;background:#ffffff50;color:#222;border-radius:50%;cursor:pointer;z-index:1}.save-note[aria-pressed=true]{background:#23331e;color:#e8f7ce}.catalog-body{padding:22px 22px 18px;flex:1;display:flex;flex-direction:column}.catalog-kicker{font:9px var(--mono);text-transform:uppercase;letter-spacing:1px;color:var(--green);margin-bottom:12px}.catalog-body h3{font-size:17px;letter-spacing:-.4px;font-weight:500;line-height:1.4;margin-bottom:10px}.catalog-body p{font-size:12px;color:var(--gray);line-height:1.8;margin-bottom:20px}.catalog-tags{display:flex;gap:7px;flex-wrap:wrap;margin-top:auto}.catalog-tags span{padding:4px 7px;border:1px solid var(--border);border-radius:3px;font:9px var(--mono);color:var(--gray)}.catalog-bottom{border-top:1px solid var(--border);padding:15px 22px;display:flex;align-items:center;justify-content:space-between;gap:10px}.catalog-price{font-size:19px;letter-spacing:-.7px}.catalog-price small{font:9px var(--mono);color:var(--gray);letter-spacing:0}.catalog-open{border:0;border-radius:4px;background:var(--green);color:#172011;font-size:11px;font-weight:600;cursor:pointer;padding:10px 13px}.catalog-open.soon{background:transparent;color:var(--gray);border:1px solid var(--border)}.catalog-empty{padding:60px 20px;border:1px dashed var(--border);text-align:center;color:var(--gray);border-radius:9px;font-size:14px}.catalog-empty button{margin-top:18px}.restore-row{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-top:24px;font-size:11px;color:var(--gray2)}.restore-row button{background:none;border:0;color:var(--gray);font-size:11px;text-decoration:underline;cursor:pointer}.legacy-course{display:none!important}
+.learning-panel{margin-top:38px;border:1px solid var(--border);padding:25px;border-radius:9px;display:grid;grid-template-columns:1fr 1.2fr;gap:25px;background:var(--bg2)}.learning-panel h3{font-size:17px;font-weight:500;margin-bottom:9px}.learning-panel p{color:var(--gray);font-size:11px;line-height:1.7}.progress-track{height:4px;background:var(--card2);margin:16px 0 10px;border-radius:4px}.progress-fill{height:100%;background:var(--green);transition:width .3s;border-radius:4px}.learning-checks{display:flex;flex-direction:column;gap:10px}.learning-checks label{display:flex;align-items:center;gap:10px;padding:10px 13px;background:var(--card);border:1px solid var(--border);border-radius:5px;font-size:11px;cursor:pointer}.learning-checks input{accent-color:var(--green);width:15px;height:15px}.learning-checks span{color:var(--gray2);margin-left:auto;font:9px var(--mono)}.reader-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:11px 16px;background:var(--bg2);border-top:1px solid var(--border)}.reader-tools button,.reader-tools a{padding:8px 12px;border:1px solid var(--border);color:var(--white);background:transparent;border-radius:5px;font-size:11px;cursor:pointer;text-decoration:none}.reader-tools p{color:var(--gray);font-size:10px;flex:1}.reader-focus #pdfViewer{position:fixed;inset:12px;z-index:800;margin:0;border-radius:9px;display:flex!important;flex-direction:column;background:var(--bg)}.reader-focus .pdf-frame-wrap{flex:1;min-height:0}.reader-focus .pdf-frame-wrap iframe{height:100%}.viewer-header{gap:14px}.viewer-title{font-size:13px}.vtab{font-size:11px}
+#lab{background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.lab-grid{display:grid;grid-template-columns:1fr 1.1fr;gap:85px;align-items:center}.lab-copy p{font-size:14px;color:var(--gray);line-height:1.85;max-width:400px;margin-top:16px}.lab-switches{display:flex;gap:8px;margin-top:24px;flex-wrap:wrap}.lab-switches button{background:transparent;border:1px solid var(--border);padding:10px 14px;color:var(--gray);font-size:11px;border-radius:5px;cursor:pointer}.lab-switches button[aria-pressed=true]{color:var(--green);border-color:var(--border-green)}.code-window{border:1px solid var(--border);border-radius:9px;overflow:hidden;background:#131611;box-shadow:0 22px 35px #0002}.code-top{border-bottom:1px solid var(--border);padding:15px 20px;font:10px var(--mono);color:#a3aa9b;display:flex;align-items:center;gap:6px}.code-top i{width:6px;height:6px;border-radius:50%;background:#58604c}.code-top span{margin-left:10px}.code-window pre{padding:26px;font:12px/2 var(--mono);white-space:pre-wrap;min-height:187px;color:#d5ddcb}.code-bottom{padding:14px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:15px}.code-bottom button{background:var(--green);border:none;color:#172011;padding:9px 13px;font-size:10px;cursor:pointer;border-radius:4px}.code-bottom span{font:9px var(--mono);color:#a3aa9b}.code-output{border-top:1px solid var(--border);background:#1e2818;padding:15px 20px;color:#d4f77d;font:11px/1.7 var(--mono);min-height:61px}.step-card{background:transparent;border:1px solid var(--border);border-radius:8px;padding:27px}.step-num{font:12px var(--mono);color:var(--green);background:transparent;border:0;width:auto;height:auto;justify-content:start}.step-icon{display:none}.step-title{font-size:17px;font-weight:500;margin-top:25px}.step-desc{font-size:12px;line-height:1.8}.steps-grid{gap:22px;margin-top:33px}.reviews-layout{gap:40px}.write-review,.rv-card{border-radius:9px}.rv-text{font-size:13px}.rv-name{font-size:12px}.rv-stars{font-size:13px;color:var(--gold)}.rv-role,.rv-date{font-size:10px}.c-icon{font-size:12px}.c-val{font-size:13px;overflow-wrap:anywhere}.c-blurb{font-size:14px}.cform input,.cform textarea{font-size:12px;background:var(--card)}.cform label{font-size:11px}.btn-send{font-size:12px}.creator-block{display:flex;justify-content:space-between;align-items:center;gap:35px;border:1px solid var(--border);padding:34px;border-radius:10px;background:var(--card);margin-top:50px}.creator-block h3{font-size:24px;font-weight:500;letter-spacing:-.8px;margin-bottom:10px}.creator-block p{font-size:13px;color:var(--gray);line-height:1.8;max-width:680px}.creator-signature{font:italic 38px Georgia,serif;color:var(--green);transform:rotate(-9deg);white-space:nowrap}#faq{background:var(--bg);padding-top:60px}.faq-grid{display:grid;grid-template-columns:1fr 1.4fr;gap:60px}.faq-items details{border-bottom:1px solid var(--border);padding:19px 0}.faq-items summary{cursor:pointer;font-size:14px;line-height:1.6}.faq-items p{font-size:13px;color:var(--gray);line-height:1.9;padding-top:15px}.faq-items details[open] summary{color:var(--green)}.flogo{font-size:15px}.flinks{gap:20px}.flinks a{font-size:10px}.fcopy{font-size:10px}.toast{font-size:12px}.mx{padding:7px;top:10px;right:10px}.mt{padding-right:22px}.modal{border-color:var(--border)}.reveal{opacity:1;transform:none}.motion-ready .reveal{opacity:0;transform:translateY(22px);transition:opacity .65s,transform .65s}.motion-ready .reveal.in-view{opacity:1;transform:none}.back-top{position:fixed;bottom:20px;left:20px;z-index:150;width:36px;height:36px;background:var(--card);color:var(--green);border:1px solid var(--border);border-radius:50%;cursor:pointer}
+[data-theme=light]{--bg:#f5f4ec;--bg2:#edeee3;--card:#fffef6;--card2:#e6e8db;--white:#242b20;--gray:#606958;--gray2:#687260;--border:rgba(48,66,33,.18);--green:#53762b;--green2:#466723;--green-dim:rgba(83,118,43,.08);--border-green:rgba(83,118,43,.35);--green-glow:rgba(83,118,43,.12);--gold:#876318}[data-theme=light] nav{background:rgba(245,244,236,.94)}[data-theme=light] .btn-primary,[data-theme=light] .btn-signup,[data-theme=light] .btn-ga,[data-theme=light] .catalog-open:not(.soon),[data-theme=light] .mbtn,[data-theme=light] .btn-pay,[data-theme=light] .btn-send,[data-theme=light] .code-bottom button,[data-theme=light] .vtab.active{color:#fff}[data-theme=light] .code-output{color:#d4f77d}[data-theme=light] .workbook{box-shadow:14px 14px 0 -5px #c4cda9,15px 15px 0 -5px #99a381,25px 32px 55px #2e381020}
+@media(min-width:901px){.studio{animation:studioEnter 1s ease both}@keyframes studioEnter{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}}
+@media(max-width:1100px){.nav-links{gap:16px}.hero-grid{gap:35px}.hero-btns{gap:8px}.btn-primary,.btn-ghost{padding:14px 16px}.catalog-cover{padding:21px}.cover-title{font-size:28px}.lab-grid{gap:40px}.catalog-toolbar{align-items:start;flex-direction:column}.search-box{width:100%;max-width:100%}}
+@media(max-width:900px){.menu-button{display:inline-grid}.nav-links{display:none}.nav-logo{margin-right:auto}nav{gap:10px}.hero-grid{grid-template-columns:1fr 1fr;gap:25px}h1{font-size:49px;letter-spacing:-2.8px}.book-title{font-size:40px}.workbook{padding-left:29px}.studio .hero-card{margin-left:0}.prow-sub{display:none}.catalog-grid{gap:14px}.catalog-body,.catalog-bottom{padding:16px}.cover-title{font-size:26px}.cover-overline{font-size:8px}.steps-grid{grid-template-columns:repeat(3,1fr)}.reviews-layout{grid-template-columns:1fr 1.2fr}.contact-grid{gap:35px}.faq-grid{gap:35px}.hero-foot{display:none}.nav-uname{max-width:65px}.nav-tools{gap:5px}}
+@media(max-width:680px){nav{height:68px;padding:0 5%;gap:8px}nav .nav-logo{font-size:14px}.logo-mark{width:27px;height:27px;font-size:12px}.btn-signup{display:none}.btn-login{font-size:11px;padding:9px}.nav-avatar{display:none}.nav-uname{display:none}.btn-logout{padding:9px;font-size:10px}.icon-button{width:31px;height:31px;font-size:15px}.mobile-nav{top:68px}section{padding:65px 5%;scroll-margin-top:78px}#home{padding:112px 6% 52px;min-height:0}.hero-grid{grid-template-columns:1fr;gap:40px}h1{font-size:57px;letter-spacing:-3.4px}.hero-tag{font-size:9px;letter-spacing:1px}.hero-desc{font-size:14px}.hero-pills{gap:13px}.pill{font-size:9px}.studio{max-width:430px;width:100%;margin:auto;padding:0}.workbook{min-height:242px;margin:0 12px 0 0;transform:rotate(-2deg)}.book-title{font-size:45px}.book-footer{margin-top:20px}.studio .hero-card{margin:24px 0 0 25px}.prow-sub{display:block}.topic-strip{font-size:9px;padding:18px 6%;gap:17px}.topic-strip span:last-child{display:none}.section-index{display:none}.catalog-toolbar{margin-top:25px;gap:14px}.filters{gap:2px}.filter{font-size:10px;padding:8px 10px}.catalog-grid{grid-template-columns:1fr;gap:24px}.catalog-cover{height:180px;padding:23px}.cover-title{font-size:34px;margin-top:25px}.catalog-body{padding:22px}.catalog-bottom{padding:15px 22px}.catalog-body h3{font-size:18px}.catalog-body p{font-size:13px}.catalog-kicker{font-size:10px}.catalog-tags span{font-size:10px}.learning-panel{grid-template-columns:1fr;padding:21px;gap:12px}.restore-row{align-items:start;font-size:10px;line-height:1.6}.lab-grid,.faq-grid{grid-template-columns:1fr;gap:30px}.steps-grid{grid-template-columns:1fr}.step-card{padding:23px}.step-title{margin-top:15px}.reviews-layout{grid-template-columns:1fr}.contact-grid{grid-template-columns:1fr}.creator-block{padding:25px;align-items:start;flex-direction:column;gap:25px}.creator-block h3{font-size:22px}.creator-signature{font-size:30px}.reader-tools p{flex-basis:100%;line-height:1.6}.pdf-frame-wrap iframe{height:65vh}.viewer-tabs{gap:5px;flex-wrap:wrap}.viewer-header{padding:14px}.vtab{padding:9px 12px}.reader-focus #pdfViewer{inset:5px}.toast{left:15px;right:15px;bottom:20px;max-width:none}.flinks{gap:15px}.modal{padding:25px}.hero-btns{flex-wrap:nowrap}.btn-primary,.btn-ghost{font-size:12px}.frow{grid-template-columns:1fr}}
+.code-window .code-output{min-height:78px;padding:15px 20px;font-size:11px;line-height:1.7;margin:0}.studio-label span:last-child::before{content:'';display:inline-block;width:5px;height:5px;margin-right:7px;border-radius:50%;background:var(--green);animation:livePulse 3s ease-in-out infinite}.book-symbol{animation:symbolFloat 8s ease-in-out infinite}@keyframes livePulse{0%,100%{opacity:.5;box-shadow:0 0 0 0 var(--green-dim)}50%{opacity:1;box-shadow:0 0 0 5px var(--green-dim)}}@keyframes symbolFloat{0%,100%{transform:rotate(-10deg) translateY(0)}50%{transform:rotate(-3deg) translateY(-9px)}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.motion-ready .reveal{opacity:1;transform:none}.catalog-card:hover,.workbook:hover{transform:none}}
+
+</style>
+<link rel="stylesheet" href="/mahirrior.css">
+</head>
+<body>
+<a class="skip-link" href="#notes">Skip to notes</a>
+<div class="scroll-meter" id="scrollMeter" aria-hidden="true"></div>
+
+<nav>
+  <a href="#home" class="nav-logo"><span class="logo-mark" aria-hidden="true">M/</span>Mahirrior</a>
+  <ul class="nav-links">
+    <li><a href="#home" class="active">Home</a></li>
+    <li><a href="#shop">Notes</a></li>
+    <li><a href="#playground">Code lab</a></li>
+    <li><a href="#how">How It Works</a></li>
+    <li><a href="#reviews">Reviews</a></li>
+    <li><a href="#contact">Contact</a></li>
+  </ul>
+  <div class="nav-actions" id="navLoggedOut">
+    <button class="btn-login"  onclick="openM('login')">Log In</button>
+    <button class="btn-signup" onclick="openM('signup')">Sign Up</button>
+  </div>
+  <div class="nav-actions nav-user" id="navLoggedIn">
+    <div class="nav-avatar" id="navAvatar">M</div>
+    <span class="nav-uname" id="navUname">User</span>
+    <button class="btn-logout" onclick="doLogout()">Logout</button>
+  </div>
+<div class="nav-tools"><button class="icon-button" id="themeToggle" aria-label="Switch to light theme">☼</button><button class="icon-button menu-button" id="menuToggle" aria-label="Open navigation" aria-expanded="false" aria-controls="mobileNav">☰</button></div>
+</nav><div class="mobile-nav" id="mobileNav" hidden><a href="#home">Home</a><a href="#shop">Shop notes</a><a href="#playground">Code lab</a><a href="#notes">Learning library</a><a href="#lab">Try a concept</a><a href="#how">How it works</a><a href="#reviews">Reviews</a><a href="#contact">Contact Mahi</a></div>
+
+<!-- ══ HERO ══ -->
+<section id="home">
+  <div class="hero-grid">
+    <div>
+      <span class="hero-tag">THE LEARNING GARAGE / BY MAHI SHARMA</span>
+      <h1>Understand it.<br>Code it.<br><span class="accent">Make it yours.</span></h1>
+      <p class="hero-desc">A clear route from your first line of Python to AI & ML. Study practical notes, try your ideas in the code lab, and keep moving forward.</p>
+      <div class="hero-btns"><button class="btn-primary" onclick="scrollToId('shop')">Explore notes <span aria-hidden="true">↗</span></button><button class="btn-ghost" onclick="scrollToId('playground')">Open code lab <span aria-hidden="true">↓</span></button></div>
+      <div class="hero-pills"><span class="pill">Beginner friendly</span><span class="pill">Learn at your pace</span><span class="pill">One-time purchase</span></div>
+      <div class="creator-byline"><div class="creator-avatar" aria-hidden="true">m</div><div><strong>Hi, I’m Mahi Sharma. <span style="color:var(--gray)">@mahirrior</span></strong><br>B.Tech student · AI & ML content creator</div></div>
+    </div>
+    <div class="studio">
+      <div class="flight-scene" id="flightScene">
+        <div class="scene-heading"><span>MAHIRRIOR / AIR GARAGE</span><span class="scene-live">IDEAS IN MOTION</span></div>
+        <div class="scene-art" aria-hidden="true">
+          <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+          <div class="scene-word">MAHIRRIOR</div>
+          <div class="city city-back"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="flight-trail"></div>
+          <div class="car-float car-main"><img src="/assets/hover-car.svg" alt="" width="620" height="320"></div>
+          <div class="car-float car-distant"><img src="/assets/hover-car.svg" alt="" width="620" height="320"></div>
+          <div class="car-shadow"></div><span class="scene-marker marker-one">01 / CURIOSITY</span><span class="scene-marker marker-two">02 / MOMENTUM</span>
+          <div class="scene-ground"></div>
+        </div>
+        <div class="scene-footer"><span>SMALL STEPS. NEW HEIGHTS.</span><button id="motionToggle" aria-pressed="false">Pause motion Ⅱ</button></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="starter-access">      <div class="hero-card">
+        <div class="card-chip">YOUR PYTHON STARTER PACK</div>
+
+        <!-- Part 1 row -->
+        <div class="prow locked" id="part1Row" onclick="handleGetAccess()">
+          <div class="prow-icon pi-gold">📄</div>
+          <div class="prow-info">
+            <div class="prow-title">Part 1 — Python Basics for AI</div>
+            <div class="prow-sub">Variables, loops & file handling</div>
+          </div>
+          <span class="pbadge pb-locked" id="badge1">🔒 ₹30</span>
+        </div>
+
+        <!-- Part 2 row -->
+        <div class="prow locked" id="part2Row" onclick="handleGetAccess()">
+          <div class="prow-icon pi-blue">🤖</div>
+          <div class="prow-info">
+            <div class="prow-title">Part 2 — Deep Python</div>
+            <div class="prow-sub">Functions, OOP basics, deeper Python</div>
+          </div>
+          <span class="pbadge pb-locked" id="badge2">🔒 Included</span>
+        </div>
+
+        <div class="price-row">
+          <div>
+            <div class="price-main">₹59</div>
+            <div class="price-note">One payment · Both parts · Forever access</div>
+          </div>
+          <button class="btn-ga" onclick="handleGetAccess()">Get Access →</button>
+        </div>
+      </div></div>
+<div class="topic-strip" aria-label="Learning topics"><span><b>01 /</b> PYTHON FOUNDATIONS</span><span><b>02 /</b> THINK IN CODE</span><span><b>03 /</b> MACHINE LEARNING</span><span><b>04 /</b> BUILD YOUR CURIOSITY</span></div>
+<!-- ══ NOTES ══ -->
+<section id="notes">
+  <div class="si">
+    <div class="section-heading reveal"><div><p class="eyebrow">01 / THE STUDY SHELF</p><h2 class="stitle">Less scrolling. More understanding.</h2><p class="ssub">Start with Python. Find your next learning obsession.<br>Clear explanations, ready whenever you are.</p></div><span class="section-index">CURATED BY MAHI ↙</span></div>
+    <div class="catalog-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="searchNotes" type="search" placeholder="Find your next topic…" aria-label="Search notes"><kbd aria-hidden="true">/</kbd></label><div class="filters" id="catalogFilters" role="group" aria-label="Filter notes"><button class="filter" data-filter="all" aria-pressed="true">All notes</button><button class="filter" data-filter="python" aria-pressed="false">Python</button><button class="filter" data-filter="ml" aria-pressed="false">Machine learning</button><button class="filter" data-filter="ai" aria-pressed="false">AI</button><button class="filter" data-filter="saved" aria-pressed="false">♡ Saved <span id="savedCount">0</span></button></div></div>
+    <div class="catalog-meta"><span id="catalogCount" role="status">Loading collections…</span><label>Sort: <select id="sortNotes" aria-label="Sort notes"><option value="featured">Featured first</option><option value="available">Available first</option><option value="az">Title A–Z</option></select></label></div>
+    <div class="catalog-grid" id="catalogGrid"></div><div class="catalog-empty" id="catalogEmpty" hidden>No notes match this view.<br><button class="btn-ghost" id="clearFilters">Clear search & filters</button></div>
+    <div class="restore-row"><span>More ideas are taking shape. Planned collections are labeled “Coming soon”.</span><button onclick="restoreAccess()">Already purchased? Restore access ↗</button></div>
+    <div class="learning-panel reveal"><div><p class="eyebrow">YOUR NEXT SMALL WIN</p><h3>Your Python learning path</h3><p>A little progress, every day. Tick off each part as you finish.<br>Your checklist and saved notes stay on this device.</p><div class="progress-track" id="studyProgress" role="progressbar" aria-label="Python parts completed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progressFill" style="width:0"></div></div><p id="progressText">0 of 2 parts marked complete</p><button class="filter" id="resumeReading" hidden>Continue reading ↗</button></div><div class="learning-checks"><label><input type="checkbox" data-progress="part1">Python foundations<span>PART 01</span></label><label><input type="checkbox" data-progress="part2">Deeper into Python<span>PART 02</span></label></div></div>
+
+    <div class="note-card legacy-course">
+      <div class="note-top">🐍<span class="ntbadge">Both Parts · ₹59</span></div>
+      <div class="note-body">
+        <div class="note-cat">Python for AI · Beginner</div>
+        <div class="note-title">Python for AI Beginners — Complete Course</div>
+        <div class="note-desc">No prior coding experience needed. Pay once and get instant access to both Part 1 and Part 2 right here in your browser.</div>
+        <div class="parts-list">
+          <div class="pc"><span class="dot dy"></span><span>Part 1 — Python Basics (variables, loops, file handling)</span></div>
+          <div class="pc"><span class="dot db"></span><span>Part 2 — Deep Python (OOPs basics, Functions, also more)</span></div>
+        </div>
+      </div>
+      <div class="note-footer">
+        <button class="btn-pb" id="noteBtnMain" onclick="handleGetAccess()">Get Both Parts for ₹59 →</button>
+        <span class="restore-link" onclick="restoreAccess()" title="Already paid? Click to restore access">Already paid? Restore access</span>
+      </div>
+    </div>
+
+    <!-- PDF VIEWER — hidden until paid -->
+    <div id="pdfViewer">
+      <div class="viewer-header">
+        <div class="viewer-title">📄 <span id="viewerLabel">Part 1 — Python Basics for AI</span></div>
+        <div class="viewer-tabs" id="viewerTabs">
+          <button class="vtab active" id="tab1" onclick="switchPart('part1')">Part 1</button>
+          <button class="vtab"        id="tab2" onclick="switchPart('part2')">Part 2</button>
+        </div>
+      </div>
+      <div class="reader-tools"><p>Having trouble viewing? Open the document in a new tab.</p><a id="openReaderTab" href="about:blank" target="_blank" rel="noopener noreferrer">Open document ↗</a><button id="markComplete">Mark as complete</button><button id="focusReader" aria-pressed="false">Focus view</button><button id="closeReader">Close reader</button></div>
+      <div class="pdf-frame-wrap">
+        <iframe id="pdfFrame"
+          src="about:blank"
+          data-part1="about:blank"
+          data-part2="about:blank"
+          allow="autoplay"
+          title="Mahirrior PDF Viewer">
+        </iframe>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="playground" aria-labelledby="playgroundTitle"><div class="si">
+  <div class="section-heading"><div><p class="eyebrow">02 / PUT YOUR IDEAS TO WORK</p><h2 class="stitle" id="playgroundTitle">Your next idea starts here.</h2><p class="ssub">Choose a language. Write a little code. See what happens.</p></div><span class="lab-badge">&lt;/&gt; THE CODE LAB</span></div>
+  <div class="compiler-shell" id="compilerShell">
+    <div class="compiler-toolbar"><label for="compilerLanguage">Language <select id="compilerLanguage"><option value="python">Python</option><option value="java">Java</option><option value="c">C</option><option value="cpp">C++</option><option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="go">Go</option><option value="rust">Rust</option></select></label><div class="compiler-actions"><span id="compilerFile">main.py</span><button id="compilerFocus" aria-pressed="false">Expand editor ↗</button></div></div>
+    <div id="compilerFrames"><div class="compiler-welcome" id="compilerWelcome"><span class="terminal-prompt" aria-hidden="true">&gt;_</span><h3>Read. Experiment. Repeat.</h3><p>A real editor for Python, Java, C, C++ and more.<br>Write code, add input, and run it right here.</p><button class="btn-primary" id="loadCompiler">Launch Python editor →</button><span>No compiler installation needed</span></div></div>
+    <div class="compiler-bottom"><p id="compilerStatus" role="status">Choose a language, then launch the editor.</p><a id="compilerExternal" href="https://onecompiler.com/python" target="_blank" rel="noopener noreferrer">Open separately ↗</a></div>
+  </div>
+  <div class="compiler-caption"><p>Powered by OneCompiler. An internet connection is required. Code you run is processed by OneCompiler.</p><p>Switch languages to explore. Opened editors keep their work while you stay on this page.</p></div>
+</div></section>
+
+<section id="lab"><div class="si lab-grid"><div class="lab-copy reveal"><p class="eyebrow">02 / A LITTLE LIGHTBULB MOMENT</p><h2 class="stitle">Don’t just read it.<br>Make it click.</h2><p id="conceptDescription"></p><div class="lab-switches" role="group" aria-label="Python concept"><button data-concept="variables" aria-pressed="true">Variables</button><button data-concept="loops" aria-pressed="false">Loops</button><button data-concept="functions" aria-pressed="false">Functions</button></div></div><div class="code-window reveal"><div class="code-top"><i></i><i></i><i></i><span id="codeFile">01_variables.py</span></div><pre id="codeExample"></pre><div class="code-bottom"><button id="runExample">▷ Show output</button><span>GUIDED EXAMPLE · PRECOMPUTED OUTPUT</span></div><pre class="code-output" id="codeOutput" aria-live="polite"></pre></div></div></section>
+<!-- ══ HOW IT WORKS ══ -->
+<section id="how">
+  <div class="si">
+    <p class="eyebrow">03 / FROM CURIOUS TO CONFIDENT</p>
+    <h2 class="stitle">A simple start. A solid foundation.</h2>
+    <p class="ssub">Simple pricing. ₹59 once — Part 1 and Part 2 both unlock instantly.</p>
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <span class="step-icon">👤</span>
+        <div class="step-title">Create Free Account</div>
+        <div class="step-desc">Sign up with email or Google. Your account saves your purchase forever.</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <span class="step-icon">💳</span>
+        <div class="step-title">Pay ₹59 Once</div>
+        <div class="step-desc">One payment instantly unlocks both Part 1 and Part 2. No subscriptions, ever.</div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <span class="step-icon">🚀</span>
+        <div class="step-title">Read Both Parts</div>
+        <div class="step-desc">Switch between Part 1 and Part 2 anytime, from any device, forever.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ REVIEWS ══ -->
+<section id="reviews">
+  <div class="si">
+    <p class="eyebrow">⭐ Reviews</p>
+    <h2 class="stitle">What Students Say</h2>
+    <p class="ssub">Real feedback from real students.</p>
+    <div class="reviews-layout">
+      <div>
+        <div class="write-card">
+          <div class="wc-title">Leave a Review ✍️</div>
+          <div class="wc-sub">Your review appears publicly. Buyers get a Verified Buyer badge.</div>
+          <div class="star-row">
+            <button class="sbtn" onclick="setStar(1)">★</button>
+            <button class="sbtn" onclick="setStar(2)">★</button>
+            <button class="sbtn" onclick="setStar(3)">★</button>
+            <button class="sbtn" onclick="setStar(4)">★</button>
+            <button class="sbtn" onclick="setStar(5)">★</button>
+          </div>
+          <div class="rform">
+            <input id="rvName" type="text"   placeholder="Your name"/>
+            <input id="rvRole" type="text"   placeholder="Your background (e.g. 1st Year CS...)"/>
+            <textarea id="rvText"            placeholder="Write your review..."></textarea>
+            <div class="buyer-note">🔒 Buyers automatically get a Verified Buyer badge.</div>
+            <button class="btn-post" onclick="postReview()">Post Review →</button>
+          </div>
+        </div>
+      </div>
+      <div class="reviews-feed" id="reviewsFeed">
+        <div class="rv-card">
+          <div class="rv-top">
+            <div class="rv-author"><div class="av av1">AK</div><div><div class="rv-name">Anjali Kumar</div><div class="rv-role">1st Year CS Student</div></div></div>
+            <div class="rv-stars">★★★★★</div>
+          </div>
+          <div class="rv-text">"Best ₹60 I've spent. Both parts are amazing!"</div>
+          <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">February 2026</span></div>
+        </div>
+        <div class="rv-card">
+          <div class="rv-top">
+            <div class="rv-author"><div class="av av2">RS</div><div><div class="rv-name">Rohan Shah</div><div class="rv-role">Engineering Fresher</div></div></div>
+            <div class="rv-stars">★★★★★</div>
+          </div>
+          <div class="rv-text">"Zero coding background. These notes made Python and AI actually make sense!"</div>
+          <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">January 2026</span></div>
+        </div>
+        <div class="rv-card">
+          <div class="rv-top">
+            <div class="rv-author"><div class="av av3">PS</div><div><div class="rv-name">Priya Soni</div><div class="rv-role">BCA Student</div></div></div>
+            <div class="rv-stars">★★★★★</div>
+          </div>
+          <div class="rv-text">"Simple, clear, no jargon. Part 2 on AI is especially brilliant!"</div>
+          <div class="rv-foot"><span class="rv-verified">✓ Verified Buyer</span><span class="rv-date">January 2026</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ CONTACT ══ -->
+<section id="contact">
+  <div class="si">
+    <p class="eyebrow">05 / LET’S TALK</p>
+    <h2 class="stitle">A real person behind the notes.</h2>
+    <p class="ssub">Questions or payment issues? I reply personally.</p>
+    <div class="contact-grid">
+      <div>
+        <p class="c-blurb">I'm Mahi Sharma — a student learning, building, and sharing what makes AI and ML click. Have a question about a topic or your purchase? Reach out.</p>
+        <div class="ci"><div class="c-icon">📧</div><div><div class="c-label">Email</div><div class="c-val">sharmabhumesh27@gmail.com</div></div></div>
+        <div class="ci"><div class="c-icon">🕐</div><div><div class="c-label">Response Time</div><div class="c-val">Usually within a few hours</div></div></div>
+      </div>
+      <form class="cform" onsubmit="sendContact(event)">
+        <div class="frow">
+          <div class="fg"><label>Name</label><input type="text"  placeholder="Your name"/></div>
+          <div class="fg"><label>Email</label><input type="email" placeholder="you@email.com"/></div>
+        </div>
+        <div class="fg"><label>Subject</label><input type="text" placeholder="e.g. Payment issue..."/></div>
+        <div class="fg"><label>Message</label><textarea placeholder="What's on your mind?"></textarea></div>
+        <button type="submit" class="btn-send">Send Message →</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section id="faq"><div class="si"><div class="faq-grid"><div><p class="eyebrow">A FEW THINGS TO KNOW</p><h2 class="stitle">Good questions.<br>Clear answers.</h2></div><div class="faq-items"><details><summary>Do I need to know Python already?</summary><p>No. The current bundle starts with Python foundations and then moves into deeper Python concepts. Start with Part 1 and work at your own pace.</p></details><details><summary>What does the ₹59 purchase include?</summary><p>The current Python bundle includes Part 1 and Part 2. The AI and machine-learning collections shown as coming soon are planned, and are not available for purchase yet.</p></details><details><summary>How do I access my notes again?</summary><p>Log in with the same account you used to purchase, then choose Read notes. You can also use Restore access. Purchases are linked to your account; bookmarks and your self-reported checklist are saved on this device.</p></details><details><summary>Can I read on my phone?</summary><p>Yes. The layout adapts to your screen. If the embedded reader does not load in your browser, use Open document to view it in a new tab.</p></details><details><summary>What if I have a payment or access issue?</summary><p>Email sharmabhumesh27@gmail.com with your account email and payment ID. Please use the same login method you used when buying your notes.</p></details></div></div><div class="creator-block reveal"><div><p class="eyebrow">BUILT BETWEEN LECTURES & LATE-NIGHT LEARNING</p><h3>I’m figuring things out, too.</h3><p>These notes are part of that journey: turning complicated topics into something a fellow student can actually use. Learn a concept. Try it. Come back for the next one.</p></div><div class="creator-signature">— Mahi Sharma</div></div></div></section>
+<button class="back-top" id="backTop" aria-label="Back to top" hidden>↑</button>
+<footer>
+  <div class="flogo"><span class="logo-dot"></span>Mahirrior</div>
+  <div class="flinks">
+    <a href="#home">Home</a>
+    <a href="#notes">Notes</a>
+    <a href="#how">How It Works</a>
+    <a href="#reviews">Reviews</a>
+    <a href="#contact">Contact</a>
+    <a href="#" onclick="openLegal('refund');  return false;">Refund Policy</a>
+    <a href="#" onclick="openLegal('privacy'); return false;">Privacy Policy</a>
+    <a href="#" onclick="openLegal('terms');   return false;">Terms</a>
+    <a href="#" onclick="openLegal('about');   return false;">About</a>
+  </div>
+  <p class="fcopy">© 2026 Mahirrior · Personal study access · Created by Mahi Sharma</p>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<!-- ══ LOGIN MODAL ══ -->
+<div class="overlay" id="loginOverlay">
+  <div class="modal">
+    <button class="mx" onclick="closeM('login')">✕</button>
+    <div class="mt">Welcome Back 👋</div>
+    <div class="ms">Log in to access your purchased notes.</div>
+    <button class="btn-google" onclick="doGoogleLogin()">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Continue with Google
+    </button>
+    <div class="or-divider"><span>or</span></div>
+    <div class="mf">
+      <div class="fg"><label>Email</label><input id="loginEmail" type="email"    placeholder="you@email.com"/></div>
+      <div class="fg"><label>Password</label><input id="loginPass" type="password" placeholder="Your password"/></div>
+      <button class="mbtn" id="loginBtn" onclick="doLogin()">Log In →</button>
+    </div>
+    <div class="msw">No account? <a onclick="switchM('login','signup')">Sign up free</a></div>
+  </div>
+</div>
+
+<!-- ══ SIGNUP MODAL ══ -->
+<div class="overlay" id="signupOverlay">
+  <div class="modal">
+    <button class="mx" onclick="closeM('signup')">✕</button>
+    <div class="mt">Create Account 🐍</div>
+    <div class="ms">Sign up to save your purchase and access both parts anytime.</div>
+    <button class="btn-google" onclick="doGoogleLogin()">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      Continue with Google
+    </button>
+    <div class="or-divider"><span>or</span></div>
+    <div class="mf">
+      <div class="fg"><label>Full Name</label><input id="signupName" type="text"     placeholder="Your name"/></div>
+      <div class="fg"><label>Email</label>    <input id="signupEmail" type="email"   placeholder="you@email.com"/></div>
+      <div class="fg"><label>Password</label> <input id="signupPass" type="password" placeholder="Min 6 characters"/></div>
+      <button class="mbtn" id="signupBtn" onclick="doSignup()">Create Account →</button>
+    </div>
+    <div class="msw">Already have an account? <a onclick="switchM('signup','login')">Log in</a></div>
+  </div>
+</div>
+
+<!-- ══ PAYMENT MODAL ══ -->
+<div class="overlay" id="paymentOverlay">
+  <div class="modal wide">
+    <button class="mx" onclick="closeM('payment')">✕</button>
+    <div class="mt">Get Both Parts — Python for AI</div>
+    <div class="ms">One-time payment · Access both parts forever from any device.</div>
+    <div class="bonus-box">
+      <span>🎁</span>
+      <span>Pay once → <strong>Part 1 + Part 2 both unlock instantly</strong>. No extra payments, ever.</span>
+    </div>
+    <div class="obox">
+      <div class="oline"><span>Part 1 — Python Basics for AI</span><span>✓ Included</span></div>
+      <div class="oline"><span>Part 2 — Deep Python </span><span>✓ Included</span></div>
+      <div class="oline tot"><span>Total</span><span>₹59</span></div>
+    </div>
+    <button class="btn-pay" onclick="doPayment()">🔒 Pay ₹59 with Razorpay</button>
+    <div class="psec">SSL Encrypted · Notes readable in-browser only</div>
+  </div>
+</div>
+
+<!-- ══ SUCCESS MODAL ══ -->
+<div class="overlay" id="successOverlay">
+  <div class="modal wide">
+    <button class="mx" onclick="closeM('success')">✕</button>
+    <div class="succ-inner">
+      <div class="succ-icon">🎉</div>
+      <div class="succ-title">Payment Successful!</div>
+      <div class="succ-sub">Both parts are now unlocked and saved to your account. Log in anytime from any device.</div>
+      <div class="access-card">
+        <div class="ac-row">
+          <div class="prow-icon pi-green">📄</div>
+          <div class="prow-info"><div class="prow-title">Part 1 — Python Basics</div><div class="prow-sub">Unlocked ✓ — available now</div></div>
+          <span class="pbadge pb-unlocked">✓ Unlocked</span>
+        </div>
+        <div class="ac-row">
+          <div class="prow-icon pi-green">🤖</div>
+          <div class="prow-info"><div class="prow-title">Part 2 — Deep Python</div><div class="prow-sub">Unlocked ✓ — available now</div></div>
+          <span class="pbadge pb-unlocked">✓ Unlocked</span>
+        </div>
+      </div>
+      <button class="mbtn" onclick="afterPayment()">Start Reading Now →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ LEGAL PAGES ══ -->
+<div class="legal-page" id="refundPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>Refund Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>All products are digital notes. Refunds available within <strong>24 hours of purchase</strong> if content is significantly different from description or technical access issues occur. Email sharmabhumesh27@gmail.com with your order details.</p>
+</div></div>
+
+<div class="legal-page" id="privacyPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>Privacy Policy</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>We collect name, email, and payment info to provide our service. Payments are processed by Razorpay. We never store card details. Your data is never sold to third parties.</p>
+</div></div>
+
+<div class="legal-page" id="termsPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>Terms of Service</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>By purchasing, you get a personal, non-transferable license to view the notes. You may not share, copy, redistribute, or resell the content. One-time payment grants personal access to the purchased products only.</p>
+</div></div>
+
+<div class="legal-page" id="aboutPage"><div class="legal-inner">
+  <div class="legal-back" onclick="closeLegal()">← Back to Home</div>
+  <h1>About Mahirrior</h1><p class="ldate">Last updated: February 17, 2026</p>
+  <p>Hi! I'm Mahi. I created these notes because I wanted simple, beginner-friendly Python for AI resources. Pay ₹59 once and get both Part 1 and Part 2 — no subscriptions, no hidden costs.</p>
+</div></div>
+
+<script>
+  window.hasPaid     = false;
+  window.currentUser = null;
+  var selectedStars  = 0;
+
+  // ── NAV active link on scroll ──
+  window.addEventListener('scroll', function() {
+    var ids   = ['home','notes','how','reviews','contact'];
+    var links = document.querySelectorAll('.nav-links a');
+    ids.forEach(function(id, i) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      if (r.top <= 80 && r.bottom > 80) {
+        links.forEach(function(l){ l.classList.remove('active'); });
+        if (links[i]) links[i].classList.add('active');
+      }
+    });
+  });
+
+  function scrollToId(id) {
+    document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ── MODALS ──
+  var OVS = { login:'loginOverlay', signup:'signupOverlay', payment:'paymentOverlay', success:'successOverlay' };
+  function openM(k)    { document.getElementById(OVS[k]).classList.add('open');    document.body.style.overflow = 'hidden'; }
+  function closeM(k)   { document.getElementById(OVS[k]).classList.remove('open'); document.body.style.overflow = ''; }
+  function switchM(a,b){ closeM(a); setTimeout(function(){ openM(b); }, 200); }
+
+  document.querySelectorAll('.overlay').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      if (e.target === el) { el.classList.remove('open'); document.body.style.overflow = ''; }
+    });
+  });
+
+  // ── HANDLE GET ACCESS (both parts) ──
+  function handleGetAccess() {
+    if (window.hasPaid) {
+      showPDF();
+      scrollToId('notes');
+      return;
+    }
+    if (!window.currentUser) {
+      window._pendingPayment = true;
+      openM('signup');
+      showToast('👆 Create a free account first to save your purchase!');
+      return;
+    }
+    openM('payment');
+  }
+
+  // ── UPDATE NAV ──
+  function updateNavForLoggedIn(user) {
+    document.getElementById('navLoggedOut').style.display = 'none';
+    var navIn = document.getElementById('navLoggedIn');
+    navIn.style.display = 'flex';
+    var name = user.displayName || user.email || 'User';
+    document.getElementById('navUname').textContent  = name.split(' ')[0];
+    document.getElementById('navAvatar').textContent = name[0].toUpperCase();
+  }
+
+  function updateNavForLoggedOut() {
+    document.getElementById('navLoggedOut').style.display = 'flex';
+    document.getElementById('navLoggedIn').style.display  = 'none';
+  }
+
+  // ── UNLOCK ALL UI (both parts) ──
+  function unlockAllUI() {
+    window.hasPaid = true;
+
+    // Update Part 1 row
+    document.getElementById('badge1').textContent = '✓ Unlocked';
+    document.getElementById('badge1').className   = 'pbadge pb-unlocked';
+    var row1 = document.getElementById('part1Row');
+    row1.classList.remove('locked');
+    row1.classList.add('unlocked');
+    row1.onclick = function(){ showPDF(); scrollToId('notes'); };
+
+    // Update Part 2 row
+    document.getElementById('badge2').textContent = '✓ Unlocked';
+    document.getElementById('badge2').className   = 'pbadge pb-unlocked';
+    var row2 = document.getElementById('part2Row');
+    row2.classList.remove('locked');
+    row2.classList.add('unlocked');
+    row2.onclick = function(){ showPDF(); switchPart('part2'); scrollToId('notes'); };
+
+    // Update note card button
+    document.getElementById('noteBtnMain').textContent = '📖 Read Notes Now';
+    document.getElementById('noteBtnMain').onclick = function(){ showPDF(); scrollToId('notes'); };
+  }
+
+  // ── LOCK ALL UI ──
+  function lockAllUI() {
+    window.hasPaid = false;
+
+    document.getElementById('badge1').textContent = '🔒 ₹59';
+    document.getElementById('badge1').className   = 'pbadge pb-locked';
+    var row1 = document.getElementById('part1Row');
+    row1.classList.add('locked');
+    row1.classList.remove('unlocked');
+    row1.onclick = handleGetAccess;
+
+    document.getElementById('badge2').textContent = '🔒 Included';
+    document.getElementById('badge2').className   = 'pbadge pb-locked';
+    var row2 = document.getElementById('part2Row');
+    row2.classList.add('locked');
+    row2.classList.remove('unlocked');
+    row2.onclick = handleGetAccess;
+
+    document.getElementById('noteBtnMain').textContent = 'Get Both Parts for ₹59 →';
+    document.getElementById('noteBtnMain').onclick = handleGetAccess;
+
+    document.getElementById('pdfViewer').style.display = 'none';
+    document.getElementById('pdfFrame').src = 'about:blank';
+  }
+
+  // ── SHOW PDF VIEWER ──
+  function showPDF() {
+    var viewer = document.getElementById('pdfViewer');
+    viewer.style.display = 'block';
+    switchPart('part1');
+    setTimeout(function(){ viewer.scrollIntoView({ behavior: 'smooth' }); }, 150);
+  }
+
+  // ── SWITCH BETWEEN PARTS ──
+  function switchPart(part) {
+    var frame = document.getElementById('pdfFrame');
+    var tab1  = document.getElementById('tab1');
+    var tab2  = document.getElementById('tab2');
+    var label = document.getElementById('viewerLabel');
+
+    if (part === 'part1') {
+      var url = frame.getAttribute('data-part1');
+      if (frame.src !== url) frame.src = url;
+      tab1.classList.add('active');
+      tab2.classList.remove('active');
+      label.textContent = 'Part 1 — Python Basics for AI';
+    } else if (part === 'part2') {
+      var url2 = frame.getAttribute('data-part2');
+      if (frame.src !== url2) frame.src = url2;
+      tab2.classList.add('active');
+      tab1.classList.remove('active');
+      label.textContent = 'Part 2 — Deep Python';
+    }
+  }
+
+  // ── RESTORE ACCESS ──
+  function restoreAccess() {
+    if (!window.currentUser) {
+      openM('login');
+      showToast('👆 Log in to restore your access.');
+      return;
+    }
+    if (window.hasPaid) {
+      showPDF();
+      scrollToId('notes');
+      showToast('📖 Here are your notes!');
+      return;
+    }
+    showToast('⏳ Checking your purchase status…');
+    if (window.firebaseDB && window.currentUser) {
+      import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js").then(function(fb) {
+        fb.getDoc(fb.doc(window.firebaseDB, "users", window.currentUser.uid)).then(function(snap) {
+          if (snap.exists() && snap.data().hasPaid === true) {
+            window.hasPaid = true;
+            unlockAllUI();
+            showPDF();
+            scrollToId('notes');
+            showToast('✅ Access restored! Happy learning 🐍');
+          } else {
+            showToast('No purchase found. Contact support if you think this is wrong.');
+          }
+        });
+      });
+    }
+  }
+
+  // ── PAYMENT ──
+  function doPayment() { window.checkoutCart(); }
+
+  function afterPayment() {
+    closeM('success');
+    showPDF();
+    scrollToId('notes');
+    showToast('🎉 Both parts unlocked! Happy learning 🐍');
+  }
+
+  // ── REVIEWS ──
+  function setStar(n) {
+    selectedStars = n;
+    document.querySelectorAll('.sbtn').forEach(function(b, i){ b.classList.toggle('lit', i < n); });
+  }
+
+  async function postReview() {
+    var name = document.getElementById('rvName').value.trim();
+    var role = document.getElementById('rvRole').value.trim();
+    var text = document.getElementById('rvText').value.trim();
+    if (!name || !text || selectedStars === 0) {
+      showToast('⚠️ Please fill all fields and select a star rating.');
+      return;
+    }
+    if (!window.postReviewToFirebase) {
+      showToast('⚠️ Review system still loading. Try again in a moment.');
+      return;
+    }
+    try {
+      await window.postReviewToFirebase({
+        name:     name,
+        role:     role || 'Student',
+        text:     text,
+        stars:    selectedStars,
+        verified: window.hasPaid
+      });
+      document.getElementById('rvName').value = '';
+      document.getElementById('rvRole').value = '';
+      document.getElementById('rvText').value = '';
+      setStar(0);
+      showToast('✅ Review posted! Thank you 🙏');
+    } catch(e) {
+      showToast('⚠️ Could not post review. Please try again.');
+    }
+  }
+
+  // ── CONTACT ──
+  function sendContact(e) {
+    e.preventDefault();
+    showToast('📧 Sending your message…');
+    setTimeout(function(){
+      showToast('✅ Message sent! I will get back to you soon.');
+      e.target.reset();
+    }, 1000);
+  }
+
+  // ── TOAST ──
+  var toastTimer = null;
+  function showToast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3800);
+  }
+
+  // ── LEGAL ──
+  var legalMap = { refund:'refundPage', privacy:'privacyPage', terms:'termsPage', about:'aboutPage' };
+  function openLegal(page) {
+    document.querySelectorAll('.legal-page').forEach(function(p){ p.classList.remove('open'); });
+    document.getElementById(legalMap[page]).classList.add('open');
+    window.scrollTo(0, 0);
+  }
+  function closeLegal() {
+    document.querySelectorAll('.legal-page').forEach(function(p){ p.classList.remove('open'); });
+  }
+</script>
+<script type="application/json" id="notesCatalog">
+[
+  {
+    "id": "python-bundle",
+    "title": "Python for AI Beginners",
+    "coverTitle": "Python for AI.\nStart here.",
+    "category": "python",
+    "level": "Beginner",
+    "description": "Build your foundations with Python basics, then go deeper into functions and OOP. Two parts. One clear starting point.",
+    "tags": [
+      "2 parts",
+      "Python",
+      "Browser reading"
+    ],
+    "access": "bundle",
+    "url": ""
+  },
+  {
+    "id": "ml-foundations",
+    "title": "Machine Learning Foundations",
+    "coverTitle": "The logic behind\nthe learning.",
+    "category": "ml",
+    "level": "Beginner",
+    "description": "A planned collection to unpack data, models, and the ideas behind machine learning. Currently in the pipeline.",
+    "tags": [
+      "ML concepts",
+      "Planned"
+    ],
+    "access": "soon",
+    "url": ""
+  },
+  {
+    "id": "ai-explained",
+    "title": "AI, Explained Simply",
+    "coverTitle": "Less mystery.\nMore AI.",
+    "category": "ai",
+    "level": "Beginner",
+    "description": "A planned collection for the curious: understanding AI concepts, one clear explanation at a time.",
+    "tags": [
+      "AI concepts",
+      "Planned"
+    ],
+    "access": "soon",
+    "url": ""
+  }
+]
+</script>
+<script id="studioEnhancements">
+/* Additive storefront features; no new Firebase collections or payment products. */
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const store = { get(key, fallback) { try { const value = JSON.parse(localStorage.getItem('mahi:v2:' + key)); return value === null ? fallback : value; } catch (_) { return fallback; } }, set(key, value) { try { localStorage.setItem('mahi:v2:' + key, JSON.stringify(value)); } catch (_) { /* Browsing still works without storage. */ } } };
+  const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function safeUrl(value) { try { const u = new URL(value, location.href); return ['https:', 'http:'].includes(u.protocol) || (location.protocol === 'file:' && u.protocol === 'file:') ? u.href : ''; } catch (_) { return ''; } }
+  let catalog = [];
+  try { catalog = JSON.parse($('notesCatalog').textContent); if (!Array.isArray(catalog)) catalog = []; } catch (_) { showToast('Catalog unavailable. The original Python bundle is available below.'); }
+  if (!catalog.some(n => n.id === 'python-bundle')) document.querySelector('.legacy-course').classList.remove('legacy-course');
+  let saved = store.get('saved', []); if (!Array.isArray(saved)) saved = [];
+  let filter = 'all'; let queryText = ''; let activeExtra = null;
+  const defaultTabs = $('viewerTabs').innerHTML;
+  const progressKey = () => 'progress:' + (window.currentUser ? window.currentUser.uid : 'guest');
+  function getProgress() { const value = store.get(progressKey(), []); return Array.isArray(value) ? value : []; }
+  let theme = store.get('theme', 'light');
+  document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  function syncTheme() { const light = document.documentElement.dataset.theme === 'light'; $('themeToggle').textContent = light ? '◐' : '☼'; $('themeToggle').setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme'); }
+  syncTheme();
+  $('themeToggle').addEventListener('click', () => { theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = theme; store.set('theme', theme); syncTheme(); });
+  $('menuToggle').addEventListener('click', () => { const expanded = $('menuToggle').getAttribute('aria-expanded') === 'true'; $('menuToggle').setAttribute('aria-expanded', String(!expanded)); $('mobileNav').hidden = expanded; });
+  $('mobileNav').addEventListener('click', e => { if (e.target.closest('a')) { $('mobileNav').hidden = true; $('menuToggle').setAttribute('aria-expanded', 'false'); } });
+  function renderCatalog() {
+    let items = catalog.filter(n => (filter === 'all' || (filter === 'saved' ? saved.includes(n.id) : n.category === filter)) && [n.title,n.category,n.description,...(n.tags || [])].join(' ').toLowerCase().includes(queryText));
+    if ($('sortNotes').value === 'az') items = items.slice().sort((a,b) => a.title.localeCompare(b.title));
+    if ($('sortNotes').value === 'available') items = items.slice().sort((a,b) => Number(a.access === 'soon') - Number(b.access === 'soon'));
+    $('catalogCount').textContent = items.length + (items.length === 1 ? ' collection' : ' collections');
+    $('savedCount').textContent = saved.filter(id => catalog.some(n => n.id === id)).length;
+    $('catalogEmpty').hidden = !!items.length;
+    $('catalogGrid').innerHTML = items.map(n => {
+      const isSaved = saved.includes(n.id); const soon = n.access === 'soon'; const paid = n.access === 'bundle'; const builtin = n.id === 'python-bundle';
+      const palette = ['python','ml','ai'].includes(n.category) ? n.category : 'ai';
+      const price = soon ? '<small>In the pipeline</small>' : paid ? (builtin ? '₹59 <small>/ both parts</small>' : '<small>Included in ₹59 bundle</small>') : 'Free';
+      const cta = soon ? 'Coming soon' : paid ? (window.hasPaid ? 'Read notes ↗' : 'Get access ↗') : 'Read notes ↗';
+      return `<article class="catalog-card"><div class="catalog-cover ${palette}"><div class="cover-grid" aria-hidden="true"></div><div class="cover-overline">MAHI’S NOTES / ${escape(n.level || 'Beginner')}</div><button class="save-note" data-save="${escape(n.id)}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Unsave' : 'Save'} ${escape(n.title)}">${isSaved ? '♥' : '♡'}</button><div class="cover-title">${escape(n.coverTitle || n.title)}</div><div class="cover-glyph" aria-hidden="true">${palette === 'python' ? '{ }' : palette === 'ml' ? 'ƒ(x)' : '✳'}</div></div><div class="catalog-body"><div class="catalog-kicker">${escape(n.category)} / ${soon ? 'Planned collection' : 'Available now'}</div><h3>${escape(n.title)}</h3><p>${escape(n.description)}</p><div class="catalog-tags">${(n.tags || []).map(t => '<span>' + escape(t) + '</span>').join('')}</div></div><div class="catalog-bottom"><div class="catalog-price">${price}</div><button class="catalog-open ${soon ? 'soon' : ''}" data-open="${escape(n.id)}" ${soon ? 'disabled' : ''}>${cta}</button></div></article>`;
+    }).join('');
+  }
+  $('catalogGrid').addEventListener('click', e => {
+    const save = e.target.closest('[data-save]'); const open = e.target.closest('[data-open]');
+    if (save) { const id = save.dataset.save; const existed = saved.includes(id); saved = existed ? saved.filter(x => x !== id) : [...saved,id]; store.set('saved', saved); renderCatalog(); const replacement = [...document.querySelectorAll('[data-save]')].find(b => b.dataset.save === id); replacement?.focus({preventScroll:true}); showToast(existed ? 'Removed from saved notes.' : 'Saved on this device.'); }
+    if (open) openNote(open.dataset.open);
+  });
+  $('searchNotes').addEventListener('input', e => { queryText = e.target.value.toLowerCase().trim(); renderCatalog(); });
+  $('sortNotes').addEventListener('change', renderCatalog);
+  $('catalogFilters').addEventListener('click', e => { const button = e.target.closest('[data-filter]'); if (!button) return; filter = button.dataset.filter; document.querySelectorAll('[data-filter]').forEach(b => b.setAttribute('aria-pressed', String(b === button))); renderCatalog(); });
+  $('clearFilters').addEventListener('click', () => { queryText = ''; $('searchNotes').value = ''; document.querySelector('[data-filter="all"]').click(); });
+  function setReader(part, noteId) { store.set('lastRead', {id:noteId || 'python-bundle', part}); $('openReaderTab').href = $('pdfFrame').src; syncProgress(); }
+  const originalSwitch = window.switchPart;
+  window.switchPart = function(part) { if (!window.hasPaid) { handleGetAccess(); return; } activeExtra = null; $('viewerTabs').innerHTML = defaultTabs; originalSwitch(part); if (part === 'part2') $('viewerLabel').textContent = 'Part 2 — Deep Python'; setReader(part); };
+  const originalShow = window.showPDF;
+  window.showPDF = function() { if (!window.hasPaid) { handleGetAccess(); return; } activeExtra = null; $('viewerTabs').innerHTML = defaultTabs; originalShow(); };
+  function openNote(id) {
+    const note = catalog.find(n => n.id === id); if (!note || note.access === 'soon') return;
+    if (note.id === 'python-bundle') { handleGetAccess(); return; }
+    if (note.access === 'bundle' && !window.hasPaid) { handleGetAccess(); return; }
+    const url = safeUrl(note.url); if (!url) { showToast('This note has no valid reading link yet.'); return; }
+    activeExtra = note;
+    $('viewerTabs').replaceChildren(); $('pdfViewer').style.display = 'block'; $('viewerLabel').textContent = note.title; $('pdfFrame').src = url;
+    setReader('extra', note.id); $('pdfViewer').scrollIntoView({behavior:'smooth'});
+  }
+  function syncProgress() {
+    const progress = getProgress(); const completed = ['part1','part2'].filter(p => progress.includes(p)).length;
+    $('progressFill').style.width = completed * 50 + '%'; $('progressText').textContent = completed + ' of 2 parts marked complete';
+    $('studyProgress').setAttribute('aria-valuenow', completed * 50);
+    document.querySelectorAll('[data-progress]').forEach(el => { el.checked = progress.includes(el.dataset.progress); });
+    const last = store.get('lastRead', null);
+    $('resumeReading').hidden = !last;
+    const key = activeExtra ? activeExtra.id : ($('tab2')?.classList.contains('active') ? 'part2' : 'part1');
+    $('markComplete').textContent = progress.includes(key) ? '✓ Completed · Undo' : 'Mark as complete';
+  }
+  function toggleComplete(key, checked) { let progress = getProgress(); progress = checked ? [...new Set([...progress,key])] : progress.filter(p => p !== key); store.set(progressKey(), progress); syncProgress(); }
+  document.querySelectorAll('[data-progress]').forEach(el => el.addEventListener('change', () => toggleComplete(el.dataset.progress, el.checked)));
+  $('markComplete').addEventListener('click', () => { const key = activeExtra ? activeExtra.id : ($('tab2')?.classList.contains('active') ? 'part2' : 'part1'); toggleComplete(key, !getProgress().includes(key)); });
+  $('resumeReading').addEventListener('click', () => { const last = store.get('lastRead', null); if (!last) return; openNote(last.id); if (last.id === 'python-bundle' && window.hasPaid) window.switchPart(last.part === 'part2' ? 'part2' : 'part1'); });
+  $('focusReader').addEventListener('click', () => { const on = document.body.classList.toggle('reader-focus'); $('focusReader').textContent = on ? 'Exit focus view' : 'Focus view'; $('focusReader').setAttribute('aria-pressed', String(on)); document.body.style.overflow = on ? 'hidden' : ''; });
+  function closeReader() { document.body.classList.remove('reader-focus'); document.body.style.overflow = ''; $('pdfViewer').style.display = 'none'; $('pdfFrame').src = 'about:blank'; $('focusReader').textContent = 'Focus view'; $('focusReader').setAttribute('aria-pressed','false'); activeExtra = null; $('viewerTabs').innerHTML = defaultTabs; }
+  $('closeReader').addEventListener('click', closeReader);
+  ['unlockAllUI','lockAllUI','updateNavForLoggedIn','updateNavForLoggedOut'].forEach(name => { const original = window[name]; window[name] = function(...args) { if (name === 'lockAllUI' || name === 'updateNavForLoggedOut' || name === 'updateNavForLoggedIn') { closeReader(); if (name !== 'lockAllUI') window.lockAllUI(); } const result = original.apply(this,args); renderCatalog(); syncProgress(); return result; }; });
+  const concepts = {
+    variables: {file:'01_variables.py',code:'# Start small. Make it click.\nstudent = "You"\ntopic = "Python for AI"\n\nprint(f"{student} can learn {topic}.")',output:'You can learn Python for AI.',detail:'A variable gives a name to a value. Change the value and you change what your program works with.'},
+    loops: {file:'02_loops.py',code:'# One idea. Repeat it.\nsteps = ["Learn", "Practice", "Build"]\n\nfor step in steps:\n    print(step)',output:'Learn\nPractice\nBuild',detail:'A loop repeats an action for each item. Here, one print statement handles all three learning steps.'},
+    functions: {file:'03_functions.py',code:'# Write once. Use again.\ndef square(number):\n    return number * number\n\nprint(square(4))',output:'16',detail:'A function packages a reusable action. This one takes a number, multiplies it by itself, and returns the result.'}
+  };
+  let currentConcept = 'variables';
+  function selectConcept(name) { currentConcept = name; const c = concepts[name]; $('codeFile').textContent = c.file; $('codeExample').textContent = c.code; $('conceptDescription').textContent = c.detail; $('codeOutput').textContent = 'Select “Show output” to follow this example.'; document.querySelectorAll('[data-concept]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.concept === name))); }
+  document.querySelectorAll('[data-concept]').forEach(b => b.addEventListener('click', () => selectConcept(b.dataset.concept)));
+  $('runExample').addEventListener('click', () => { $('codeOutput').textContent = concepts[currentConcept].output; }); selectConcept(currentConcept);
+  // Existing contact form has no sending backend: open an honest, actionable email draft.
+  window.sendContact = function(e) { e.preventDefault(); const fields = e.target.querySelectorAll('input,textarea'); const body = 'From: ' + fields[0].value.trim() + '\nEmail: ' + fields[1].value.trim() + '\n\n' + fields[3].value.trim(); location.href = 'mailto:sharmabhumesh27@gmail.com?subject=' + encodeURIComponent(fields[2].value.trim()) + '&body=' + encodeURIComponent(body); showToast('Email draft opened. Send it from your email app.'); };
+  document.querySelectorAll('.cform input,.cform textarea').forEach((input,i) => { input.required = true; input.id = 'contactField' + i; input.previousElementSibling?.setAttribute('for', input.id); });
+  document.querySelector('.btn-send').textContent = 'Open email draft ↗';
+  document.querySelectorAll('.fg input,.fg textarea,.fg select').forEach((input,i) => { if (!input.id) input.id = 'field-' + i; const label = input.parentElement.querySelector('label'); if (label) label.htmlFor = input.id; });
+  $('toast').setAttribute('role','status'); $('toast').setAttribute('aria-live','polite');
+  // Keyboard and focus behavior added around the existing modal entry points.
+  let previousFocus = null; const baseOpen = window.openM, baseClose = window.closeM;
+  window.openM = function(k) { previousFocus = document.activeElement; baseOpen(k); const overlay = $(OVS[k]); overlay.setAttribute('role','dialog'); overlay.setAttribute('aria-modal','true'); const title = overlay.querySelector('.mt,.succ-title'); if (title) { title.id = k + 'DialogTitle'; overlay.setAttribute('aria-labelledby',title.id); } requestAnimationFrame(() => overlay.querySelector('input,button')?.focus()); };
+  window.closeM = function(k) { baseClose(k); previousFocus?.focus?.(); };
+  document.querySelectorAll('.mx').forEach(b => b.setAttribute('aria-label','Close dialog'));
+  document.querySelectorAll('.prow[onclick],.restore-link,.msw a,.legal-back').forEach(el => { el.tabIndex = 0; el.setAttribute('role','button'); el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } }); });
+  document.addEventListener('keydown', e => {
+    const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    if (e.key === '/' && !typing && !document.querySelector('.overlay.open')) { e.preventDefault(); scrollToId('notes'); $('searchNotes').focus({preventScroll:true}); }
+    if (e.key === 'Escape') { const overlay = document.querySelector('.overlay.open'); if (overlay) { const key = Object.keys(OVS).find(k => OVS[k] === overlay.id); window.closeM(key); } else if (document.body.classList.contains('reader-focus')) $('focusReader').click(); else closeLegal(); $('mobileNav').hidden = true; $('menuToggle').setAttribute('aria-expanded','false'); }
+    const dialog = document.querySelector('.overlay.open');
+    if (e.key === 'Tab' && dialog) { const focusable = [...dialog.querySelectorAll('button,input,a[tabindex]')].filter(el => !el.disabled && el.offsetParent !== null); const first = focusable[0], last = focusable[focusable.length-1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } }
+    if (e.key === 'Enter' && document.activeElement.matches('#loginEmail,#loginPass')) window.doLogin?.();
+    if (e.key === 'Enter' && document.activeElement.matches('#signupName,#signupEmail,#signupPass')) window.doSignup?.();
+  });
+  if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) { document.documentElement.classList.add('motion-ready'); const observer = new IntersectionObserver(entries => entries.forEach(entry => { if (entry.isIntersecting) { entry.target.classList.add('in-view'); observer.unobserve(entry.target); } }),{threshold:.06}); document.querySelectorAll('.reveal').forEach(el => observer.observe(el)); }
+  function scrollUpdate() { const max = document.documentElement.scrollHeight - innerHeight; $('scrollMeter').style.width = (max ? scrollY / max * 100 : 0) + '%'; $('backTop').hidden = scrollY < 600; }
+  let scheduled = false; addEventListener('scroll', () => { if (!scheduled) { scheduled = true; requestAnimationFrame(() => { scrollUpdate(); scheduled = false; }); } }, {passive:true});
+  $('backTop').addEventListener('click', () => scrollToId('home'));
+  renderCatalog(); syncProgress(); scrollUpdate();
+})();
+
+</script>
+<script src="/store.js"></script>
+<script src="/mahirrior.js"></script></body>
+</html>
